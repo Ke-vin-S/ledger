@@ -151,6 +151,142 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	return s.repo.FindByID(ctx, id)
 }
 
+// UpdateMe applies partial profile updates for the authenticated user.
+func (s *Service) UpdateMe(ctx context.Context, id uuid.UUID, displayName, avatarURL, currencyPref, timezone *string) (*User, error) {
+	u, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if displayName != nil {
+		if err := validateDisplayName(*displayName); err != nil {
+			return nil, err
+		}
+		u.DisplayName = strings.TrimSpace(*displayName)
+	}
+	if avatarURL != nil {
+		u.AvatarURL = avatarURL
+	}
+	if currencyPref != nil {
+		cp := strings.ToUpper(strings.TrimSpace(*currencyPref))
+		if len(cp) != 3 {
+			return nil, fmt.Errorf("currency_pref must be a 3-character ISO 4217 code")
+		}
+		u.CurrencyPref = cp
+	}
+	if timezone != nil {
+		tz := strings.TrimSpace(*timezone)
+		if tz == "" {
+			return nil, fmt.Errorf("timezone cannot be empty")
+		}
+		u.Timezone = tz
+	}
+	updated, err := s.repo.Update(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionUserUpdated,
+		ActorID:    &id,
+		EntityType: "user",
+		EntityID:   id,
+		After:      updated,
+	})
+	return updated, nil
+}
+
+// GetNotificationPrefs returns the authenticated user's notification preferences.
+func (s *Service) GetNotificationPrefs(ctx context.Context, userID uuid.UUID) (*NotificationPrefs, error) {
+	return s.repo.GetNotificationPrefs(ctx, userID)
+}
+
+// UpdateNotificationPrefs replaces notification preferences for the authenticated user.
+func (s *Service) UpdateNotificationPrefs(ctx context.Context, userID uuid.UUID, emailEnabled, digestMode *bool, disabledTypes []string) (*NotificationPrefs, error) {
+	prefs, err := s.repo.GetNotificationPrefs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if emailEnabled != nil {
+		prefs.EmailEnabled = *emailEnabled
+	}
+	if digestMode != nil {
+		prefs.DigestMode = *digestMode
+	}
+	if disabledTypes != nil {
+		prefs.DisabledTypes = disabledTypes
+	}
+	return s.repo.UpdateNotificationPrefs(ctx, prefs)
+}
+
+// CreateAnonymous creates an anonymous user placeholder on behalf of a registered user.
+func (s *Service) CreateAnonymous(ctx context.Context, displayName string, createdBy uuid.UUID) (*User, error) {
+	if err := validateDisplayName(displayName); err != nil {
+		return nil, err
+	}
+	u, err := s.repo.CreateAnonymous(ctx, strings.TrimSpace(displayName), createdBy)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionUserCreated,
+		ActorID:    &createdBy,
+		EntityType: "user",
+		EntityID:   u.ID,
+		After:      u,
+		Meta:       map[string]any{"identity_type": "anonymous"},
+	})
+	return u, nil
+}
+
+// GenerateClaimToken creates a hashed one-time claim token for the given anonymous user.
+// Returns the raw token (to be embedded in the claim URL).
+func (s *Service) GenerateClaimToken(ctx context.Context, anonUserID, createdBy uuid.UUID) (rawToken string, expiresAt time.Time, err error) {
+	anonUser, err := s.repo.FindByID(ctx, anonUserID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if !anonUser.IsAnonymous() {
+		return "", time.Time{}, ErrNotAnonymous
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", time.Time{}, fmt.Errorf("generate token: %w", err)
+	}
+	rawToken = hex.EncodeToString(raw)
+	h := sha256ClaimToken(rawToken)
+	expiresAt = time.Now().Add(7 * 24 * time.Hour)
+
+	if _, err := s.repo.CreateClaimToken(ctx, anonUserID, createdBy, h, expiresAt); err != nil {
+		return "", time.Time{}, fmt.Errorf("store claim token: %w", err)
+	}
+	return rawToken, expiresAt, nil
+}
+
+// ClaimAnonymous atomically merges an anonymous profile into the authenticated user's account.
+func (s *Service) ClaimAnonymous(ctx context.Context, rawToken string, claimedByID uuid.UUID) error {
+	h := sha256ClaimToken(rawToken)
+	anonID, err := s.repo.Claim(ctx, h, claimedByID)
+	if err != nil {
+		return err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionUserClaimed,
+		ActorID:    &claimedByID,
+		EntityType: "user",
+		EntityID:   anonID,
+		Meta: map[string]any{
+			"anon_user_id":    anonID.String(),
+			"claimed_by":      claimedByID.String(),
+		},
+	})
+	return nil
+}
+
+func sha256ClaimToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
+
 // GeneratePasswordResetToken creates a one-time reset token for the given email.
 // The token is hashed before storage; the raw token is returned to the caller.
 // In production, the caller should email the token — never log or return it in the response.

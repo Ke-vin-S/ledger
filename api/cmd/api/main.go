@@ -20,6 +20,7 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
+	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 	"github.com/Ke-vin-S/ledger/api/internal/repository"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
@@ -78,6 +79,7 @@ func run() error {
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
+	userH := userhandler.New(userSvc, cfg.FrontendURL)
 
 	// Router
 	r := chi.NewRouter()
@@ -93,6 +95,7 @@ func run() error {
 	})
 
 	r.Mount("/v1/auth", authH.Routes(authMW))
+	r.Mount("/v1/users", userH.Routes(authMW))
 
 	// Additional feature routes will be mounted here as each phase is built.
 

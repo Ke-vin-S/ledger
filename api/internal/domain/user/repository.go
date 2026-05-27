@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -28,9 +29,23 @@ type Repository interface {
 	// UpsertOAuthAccount links an OAuth account to an existing user, or updates the link if it already exists.
 	UpsertOAuthAccount(ctx context.Context, userID uuid.UUID, provider, providerUID string, email *string) error
 
+	// Update stores changes to display_name, avatar_url, currency_pref, timezone.
+	Update(ctx context.Context, u *User) (*User, error)
+
 	// UpdatePassword sets a new bcrypt password hash for the user.
 	UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 
-	// Update stores changes to display_name, avatar_url, currency_pref, timezone.
-	Update(ctx context.Context, u *User) (*User, error)
+	// GetNotificationPrefs returns the caller's notification preferences.
+	GetNotificationPrefs(ctx context.Context, userID uuid.UUID) (*NotificationPrefs, error)
+
+	// UpdateNotificationPrefs replaces the caller's notification preferences.
+	UpdateNotificationPrefs(ctx context.Context, prefs *NotificationPrefs) (*NotificationPrefs, error)
+
+	// CreateClaimToken inserts a claim_tokens row with a hashed token.
+	CreateClaimToken(ctx context.Context, anonUserID, createdBy uuid.UUID, tokenHash string, expiresAt time.Time) (*ClaimToken, error)
+
+	// Claim atomically merges an anonymous user into the registered user in a single transaction.
+	// It marks the claim token as used, sets claimed_by/claimed_at on the anon user, and
+	// reassigns all expenses, splits, settlements, and team memberships.
+	Claim(ctx context.Context, tokenHash string, claimedByID uuid.UUID) (anonUserID uuid.UUID, err error)
 }
