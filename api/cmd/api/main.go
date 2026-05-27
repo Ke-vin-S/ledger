@@ -19,11 +19,13 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
+	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 	"github.com/Ke-vin-S/ledger/api/internal/repository"
-	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 )
 
 func main() {
@@ -61,7 +63,7 @@ func run() error {
 	}
 	log.Println("connected to redis")
 
-	// Core services
+	// Core infrastructure
 	auditor := audit.NewLogger(pool)
 	jwtSvc, err := jwtauth.NewJWTService(cfg.JWTPrivateKey, cfg.JWTPublicKey)
 	if err != nil {
@@ -69,17 +71,20 @@ func run() error {
 	}
 	tokenStore := jwtauth.NewTokenStore(rdb)
 	resetStore := jwtauth.NewResetStore(rdb)
-
-	// Auth middleware (for protected routes)
 	authMW := jwtauth.RequireAuth(jwtSvc, tokenStore)
 
-	// Repositories & domain services
+	// Repositories
 	userRepo := repository.NewUserRepo(pool)
+	teamRepo := repository.NewTeamRepo(pool)
+
+	// Domain services
 	userSvc := user.NewService(userRepo, auditor)
+	teamSvc := team.NewService(teamRepo, userRepo, auditor)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
 	userH := userhandler.New(userSvc, cfg.FrontendURL)
+	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
 
 	// Router
 	r := chi.NewRouter()
@@ -96,6 +101,8 @@ func run() error {
 
 	r.Mount("/v1/auth", authH.Routes(authMW))
 	r.Mount("/v1/users", userH.Routes(authMW))
+	r.Mount("/v1/teams", teamH.Routes(authMW))
+	r.With(authMW).Post("/v1/invite/{token}", teamH.JoinViaInviteLink)
 
 	// Additional feature routes will be mounted here as each phase is built.
 
