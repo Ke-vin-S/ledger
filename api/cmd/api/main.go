@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
@@ -19,14 +20,32 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
+	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 	"github.com/Ke-vin-S/ledger/api/internal/repository"
+	"github.com/Ke-vin-S/ledger/api/internal/storage"
 )
+
+// teamGateway adapts team.Repository to expense.TeamGateway.
+type teamGatewayAdapter struct{ repo team.Repository }
+
+func teamGateway(repo team.Repository) expense.TeamGateway {
+	return &teamGatewayAdapter{repo: repo}
+}
+
+func (a *teamGatewayAdapter) GetMembership(ctx context.Context, teamID, userID uuid.UUID) (string, string, error) {
+	m, err := a.repo.GetMembership(ctx, teamID, userID)
+	if err != nil {
+		return "", "", err
+	}
+	return m.Role, m.Status, nil
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -76,15 +95,24 @@ func run() error {
 	// Repositories
 	userRepo := repository.NewUserRepo(pool)
 	teamRepo := repository.NewTeamRepo(pool)
+	expenseRepo := repository.NewExpenseRepo(pool)
+
+	// S3 presigner
+	presigner, err := storage.NewS3Presigner(ctx, cfg.S3Bucket, cfg.AWSRegion)
+	if err != nil {
+		return fmt.Errorf("init s3 presigner: %w", err)
+	}
 
 	// Domain services
 	userSvc := user.NewService(userRepo, auditor)
 	teamSvc := team.NewService(teamRepo, userRepo, auditor)
+	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
 	userH := userhandler.New(userSvc, cfg.FrontendURL)
 	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
+	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
 
 	// Router
 	r := chi.NewRouter()
@@ -103,8 +131,12 @@ func run() error {
 	r.Mount("/v1/users", userH.Routes(authMW))
 	r.Mount("/v1/teams", teamH.Routes(authMW))
 	r.With(authMW).Post("/v1/invite/{token}", teamH.JoinViaInviteLink)
+	r.Mount("/v1/expenses", expenseH.Routes(authMW))
 
-	// Additional feature routes will be mounted here as each phase is built.
+	// Team-scoped expense routes sit under the team router.
+	r.Route("/v1/teams/{teamId}/expenses", func(r chi.Router) {
+		r.Mount("/", expenseH.TeamRoutes(authMW))
+	})
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
