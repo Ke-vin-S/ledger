@@ -21,10 +21,12 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
+	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
@@ -96,6 +98,7 @@ func run() error {
 	userRepo := repository.NewUserRepo(pool)
 	teamRepo := repository.NewTeamRepo(pool)
 	expenseRepo := repository.NewExpenseRepo(pool)
+	settlementRepo := repository.NewSettlementRepo(pool)
 
 	// S3 presigner
 	presigner, err := storage.NewS3Presigner(ctx, cfg.S3Bucket, cfg.AWSRegion)
@@ -107,12 +110,14 @@ func run() error {
 	userSvc := user.NewService(userRepo, auditor)
 	teamSvc := team.NewService(teamRepo, userRepo, auditor)
 	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
+	settlementSvc := settlement.NewService(settlementRepo, auditor)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
 	userH := userhandler.New(userSvc, cfg.FrontendURL)
 	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
+	settlementH := settlementhandler.New(settlementSvc)
 
 	// Router
 	r := chi.NewRouter()
@@ -137,6 +142,16 @@ func run() error {
 	r.Route("/v1/teams/{teamId}/expenses", func(r chi.Router) {
 		r.Mount("/", expenseH.TeamRoutes(authMW))
 	})
+
+	// Settlement routes
+	r.Route("/v1/expenses/{expenseId}/settlements", func(r chi.Router) {
+		r.Mount("/", settlementH.ExpenseRoutes(authMW))
+	})
+	r.Mount("/v1/settlements", settlementH.SettlementRoutes(authMW))
+	r.Route("/v1/teams/{teamId}/balances", func(r chi.Router) {
+		r.Mount("/", settlementH.TeamBalanceRoutes(authMW))
+	})
+	r.Mount("/v1/balances", settlementH.MyBalancesHandler(authMW))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
