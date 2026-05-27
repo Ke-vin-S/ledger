@@ -15,9 +15,14 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
+	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
+	"github.com/Ke-vin-S/ledger/api/internal/audit"
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
+	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
+	"github.com/Ke-vin-S/ledger/api/internal/repository"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 )
 
 func main() {
@@ -55,6 +60,26 @@ func run() error {
 	}
 	log.Println("connected to redis")
 
+	// Core services
+	auditor := audit.NewLogger(pool)
+	jwtSvc, err := jwtauth.NewJWTService(cfg.JWTPrivateKey, cfg.JWTPublicKey)
+	if err != nil {
+		return fmt.Errorf("init jwt: %w", err)
+	}
+	tokenStore := jwtauth.NewTokenStore(rdb)
+	resetStore := jwtauth.NewResetStore(rdb)
+
+	// Auth middleware (for protected routes)
+	authMW := jwtauth.RequireAuth(jwtSvc, tokenStore)
+
+	// Repositories & domain services
+	userRepo := repository.NewUserRepo(pool)
+	userSvc := user.NewService(userRepo, auditor)
+
+	// Handlers
+	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
+
+	// Router
 	r := chi.NewRouter()
 	r.Use(middleware.CORS)
 	r.Use(middleware.RequestID)
@@ -62,12 +87,14 @@ func run() error {
 	r.Use(chimiddleware.Recoverer)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Feature routes are mounted here as they are built.
-	// r.Mount("/v1", v1Router(...))
+	r.Mount("/v1/auth", authH.Routes(authMW))
+
+	// Additional feature routes will be mounted here as each phase is built.
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
