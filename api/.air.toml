@@ -1,0 +1,18 @@
+[build]
+  cmd = "go build -o ./tmp/api ./cmd/api"
+  bin = "./tmp/api"
+  include_ext = ["go", "graphqls"]
+  exclude_dir = ["tmp", "vendor"]
+  delay = 1000
+  kill_delay = "0.5s"
+  rerun_delay = 500
+
+[log]
+  time = true
+
+[color]
+  build   = "yellow"
+  runner  = "green"
+
+[misc]
+  clean_on_exit = true
