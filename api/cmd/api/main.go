@@ -21,11 +21,13 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
+	domainflag "github.com/Ke-vin-S/ledger/api/internal/domain/flag"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
+	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
@@ -99,6 +101,7 @@ func run() error {
 	teamRepo := repository.NewTeamRepo(pool)
 	expenseRepo := repository.NewExpenseRepo(pool)
 	settlementRepo := repository.NewSettlementRepo(pool)
+	flagRepo := repository.NewFlagRepo(pool)
 
 	// S3 presigner
 	presigner, err := storage.NewS3Presigner(ctx, cfg.S3Bucket, cfg.AWSRegion)
@@ -111,6 +114,7 @@ func run() error {
 	teamSvc := team.NewService(teamRepo, userRepo, auditor)
 	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
+	flagSvc := domainflag.NewService(flagRepo, auditor)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
@@ -118,6 +122,7 @@ func run() error {
 	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
 	settlementH := settlementhandler.New(settlementSvc)
+	flagH := flaghandler.New(flagSvc)
 
 	// Router
 	r := chi.NewRouter()
@@ -152,6 +157,12 @@ func run() error {
 		r.Mount("/", settlementH.TeamBalanceRoutes(authMW))
 	})
 	r.Mount("/v1/balances", settlementH.MyBalancesHandler(authMW))
+
+	// Flag routes
+	r.Route("/v1/expenses/{expenseId}/flags", func(r chi.Router) {
+		r.Mount("/", flagH.ExpenseRoutes(authMW))
+	})
+	r.Mount("/v1/flags", flagH.FlagRoutes(authMW))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
