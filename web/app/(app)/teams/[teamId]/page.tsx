@@ -5,12 +5,23 @@ import { useParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useTeam, useTeamMembers, useInviteMember } from "@/hooks/useTeam";
+import {
+  useTeam,
+  useTeamMembers,
+  useInviteMember,
+  useAddAnonymousMember,
+  useGenerateClaimToken,
+  useRemoveMember,
+  isAnonymousMember,
+} from "@/hooks/useTeam";
+import { useMe } from "@/hooks/useAuth";
 import { useExpenses, useCreateExpense, useVoidExpense } from "@/hooks/useExpenses";
 import { useTeamBalances } from "@/hooks/useSettlements";
 import { ActivityFeed } from "@/components/team/ActivityFeed";
 import { ExpenseCard } from "@/components/expense/ExpenseCard";
 import { AmountInput } from "@/components/expense/AmountInput";
+import { MemberPicker, type PickedMember } from "@/components/expense/MemberPicker";
+import { SplitBuilder, type SplitMethod, type SplitEntry } from "@/components/expense/SplitBuilder";
 import { DebtBar } from "@/components/settlement/DebtBar";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { Avatar } from "@/components/shared/Avatar";
@@ -19,30 +30,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus } from "lucide-react";
+import { Plus, UserPlus, UserX, Link2, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
-const SPLIT_METHODS = ["equal", "exact", "percentage", "shares"] as const;
+const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
+  { value: "equal", label: "Equal" },
+  { value: "exact", label: "Exact amounts" },
+  { value: "percentage", label: "Percentage" },
+  { value: "shares", label: "Shares / weights" },
+];
 
-const CURRENCIES = [
-  "LKR", "USD", "EUR", "GBP", "INR", "SGD", "AUD",
-] as const;
+const CURRENCIES = ["LKR", "USD", "EUR", "GBP", "INR", "SGD", "AUD"] as const;
 
 const expenseSchema = z.object({
   title: z.string().min(1, "Title is required"),
   amount: z.number().int().positive("Amount must be positive"),
-  currency: z.string().min(1, "Currency is required"),
-  split_method: z.enum(SPLIT_METHODS),
+  currency: z.string().min(1),
+  split_method: z.enum(["equal", "exact", "percentage", "shares"]),
   expense_date: z.string().min(1, "Date is required"),
+  paid_by: z.string().min(1, "Select who paid"),
   note: z.string().optional(),
 });
 type ExpenseFormValues = z.infer<typeof expenseSchema>;
 
+const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
+
 function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () => void }) {
+  const { data: me } = useMe();
+  const { data: teamMembers } = useTeamMembers(teamId);
   const { mutateAsync, isPending } = useCreateExpense(teamId);
   const [serverError, setServerError] = useState<string | null>(null);
   const [amount, setAmount] = useState(0);
   const [currency, setCurrency] = useState("LKR");
+  const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
+  const [participants, setParticipants] = useState<string[]>([]);
+  const [participantObjects, setParticipantObjects] = useState<PickedMember[]>([]);
+  const [splits, setSplits] = useState<SplitEntry[]>([]);
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseSchema),
@@ -50,20 +74,28 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
       currency: "LKR",
       split_method: "equal",
       expense_date: new Date().toISOString().split("T")[0],
+      paid_by: me?.id ?? "",
     },
   });
 
   async function onSubmit(data: ExpenseFormValues) {
+    if (participants.length === 0) {
+      setServerError("Select at least one participant to split with.");
+      return;
+    }
     setServerError(null);
     try {
-      await mutateAsync({
+      const payload: Parameters<typeof mutateAsync>[0] = {
         title: data.title,
         amount: data.amount,
         currency: data.currency,
         split_method: data.split_method,
         expense_date: data.expense_date,
+        paid_by: data.paid_by,
         note: data.note || undefined,
-      });
+        splits: splits.length > 0 ? splits : participants.map((id) => ({ user_id: id })),
+      };
+      await mutateAsync(payload);
       onClose();
     } catch (err) {
       if (err instanceof ApiRequestError) setServerError(err.error.message);
@@ -85,74 +117,94 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
           <div className="space-y-1.5">
             <Label>Title</Label>
             <Input placeholder="e.g. Dinner at Commons" {...register("title")} />
-            {errors.title && (
-              <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>
-            )}
+            {errors.title && <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Currency</Label>
               <select
-                className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+                className={selectClass}
                 {...register("currency")}
-                onChange={(e) => {
-                  setValue("currency", e.target.value);
-                  setCurrency(e.target.value);
-                }}
+                onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
                 defaultValue="LKR"
               >
-                {CURRENCIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
+                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
-              {errors.currency && (
-                <p className="text-xs text-[hsl(var(--destructive))]">{errors.currency.message}</p>
-              )}
             </div>
             <div className="space-y-1.5">
               <Label>Date</Label>
               <Input type="date" {...register("expense_date")} />
-              {errors.expense_date && (
-                <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>
-              )}
+              {errors.expense_date && <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>}
             </div>
           </div>
 
           <div className="space-y-1.5">
             <Label>Amount</Label>
-            <AmountInput
-              value={amount}
-              currency={currency}
-              onChange={(v) => {
-                setAmount(v);
-                setValue("amount", v);
-              }}
-            />
-            {errors.amount && (
-              <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>
-            )}
+            <AmountInput value={amount} currency={currency} onChange={(v) => { setAmount(v); setValue("amount", v); }} />
+            {errors.amount && <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>}
           </div>
+
+          {/* Paid by */}
+          {teamMembers && teamMembers.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Paid by</Label>
+              <select className={selectClass} {...register("paid_by")} defaultValue={me?.id ?? ""}>
+                <option value="">Select who paid…</option>
+                {teamMembers.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
+                  </option>
+                ))}
+              </select>
+              {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Split method</Label>
               <select
-                className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+                className={selectClass}
                 {...register("split_method")}
+                onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
               >
-                {SPLIT_METHODS.map((m) => (
-                  <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
+                {SPLIT_METHODS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
                 ))}
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>
-                Note <span className="text-[hsl(var(--muted-foreground))]">(optional)</span>
-              </Label>
+              <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(opt.)</span></Label>
               <Input placeholder="Any details" {...register("note")} />
             </div>
           </div>
+
+          {/* Participants */}
+          <div className="space-y-1.5">
+            <Label>Participants</Label>
+            <MemberPicker
+              teamId={teamId}
+              selected={participants}
+              onChange={setParticipants}
+              onMembersChange={setParticipantObjects}
+            />
+          </div>
+
+          {/* Split preview */}
+          {participants.length > 0 && amount > 0 && (
+            <div className="border rounded-xl p-3 bg-[hsl(var(--muted)/0.4)] space-y-2">
+              <p className="text-[0.7rem] uppercase tracking-wide font-semibold text-[hsl(var(--muted-foreground))]">Split preview</p>
+              <SplitBuilder
+                participants={participantObjects}
+                total={amount}
+                currency={currency}
+                method={splitMethod}
+                value={splits}
+                onChange={setSplits}
+              />
+            </div>
+          )}
 
           <div className="flex gap-2 pt-1">
             <Button type="submit" disabled={isPending} size="sm">
@@ -168,14 +220,168 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
   );
 }
 
+// ── Members Tab ─────────────────────────────────────────────────────────────
+
+function MembersTab({ teamId }: { teamId: string }) {
+  const { data: members } = useTeamMembers(teamId);
+  const { mutateAsync: inviteMember } = useInviteMember(teamId);
+  const { mutateAsync: addAnonymous } = useAddAnonymousMember(teamId);
+  const { mutateAsync: generateClaimToken } = useGenerateClaimToken();
+  const { mutate: removeMember } = useRemoveMember(teamId);
+
+  const [showInvite, setShowInvite] = useState(false);
+  const [showAddAnon, setShowAddAnon] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [invitePending, setInvitePending] = useState(false);
+  const [anonName, setAnonName] = useState("");
+  const [anonError, setAnonError] = useState("");
+  const [anonPending, setAnonPending] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function handleInvite() {
+    if (!inviteEmail) { setInviteError("Email is required"); return; }
+    setInviteError(""); setInvitePending(true);
+    try {
+      await inviteMember({ email: inviteEmail });
+      setInviteEmail(""); setShowInvite(false);
+    } catch (err) {
+      setInviteError(err instanceof ApiRequestError ? err.error.message : "Failed to invite");
+    } finally { setInvitePending(false); }
+  }
+
+  async function handleAddAnon() {
+    if (!anonName.trim()) { setAnonError("Name is required"); return; }
+    setAnonError(""); setAnonPending(true);
+    try {
+      await addAnonymous({ display_name: anonName.trim() });
+      setAnonName(""); setShowAddAnon(false);
+    } catch (err) {
+      setAnonError(err instanceof ApiRequestError ? err.error.message : "Failed to add");
+    } finally { setAnonPending(false); }
+  }
+
+  async function handleCopyClaimLink(userId: string) {
+    try {
+      const res = await generateClaimToken(userId);
+      await navigator.clipboard.writeText(res.claim_url);
+      setCopiedId(userId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Action buttons */}
+      <div className="flex gap-2 flex-wrap">
+        <Button size="sm" variant="outline" onClick={() => { setShowInvite(!showInvite); setShowAddAnon(false); }}>
+          <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+          Invite by email
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => { setShowAddAnon(!showAddAnon); setShowInvite(false); }}>
+          <UserX className="h-3.5 w-3.5 mr-1.5" />
+          Add without account
+        </Button>
+      </div>
+
+      {/* Invite by email form */}
+      {showInvite && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Email</Label>
+              <Input
+                type="email"
+                placeholder="colleague@example.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleInvite())}
+                className="h-8 text-sm"
+              />
+            </div>
+            {inviteError && <p className="text-xs text-[hsl(var(--destructive))]">{inviteError}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleInvite} disabled={invitePending}>
+                {invitePending ? "Sending…" : "Send invite"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowInvite(false); setInviteError(""); }}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add anonymous form */}
+      {showAddAnon && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Name</Label>
+              <Input
+                placeholder="e.g. Rahul (no account)"
+                value={anonName}
+                onChange={(e) => setAnonName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddAnon())}
+                className="h-8 text-sm"
+              />
+            </div>
+            {anonError && <p className="text-xs text-[hsl(var(--destructive))]">{anonError}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAddAnon} disabled={anonPending}>
+                {anonPending ? "Adding…" : "Add member"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowAddAnon(false); setAnonError(""); }}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Members list */}
+      <div className="space-y-2">
+        {members?.map((m) => {
+          const isAnon = isAnonymousMember(m);
+          return (
+            <div key={m.user_id} className="flex items-center gap-3 p-3 border rounded-xl bg-[hsl(var(--card))]">
+              <Avatar name={m.display_name} size="sm" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium truncate">{m.display_name}</p>
+                  {isAnon && <Badge variant="outline" className="text-[0.65rem] py-0 px-1.5 border-dashed">anon</Badge>}
+                </div>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {isAnon ? "No account — awaiting claim" : m.status}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="secondary" className="text-xs">{m.role}</Badge>
+                {isAnon && (
+                  <button
+                    onClick={() => handleCopyClaimLink(m.user_id)}
+                    className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                    title="Copy claim link"
+                  >
+                    {copiedId === m.user_id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Link2 className="h-3.5 w-3.5" />}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {!members?.length && (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">No members found.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
+
 export default function TeamPage() {
   const { teamId } = useParams<{ teamId: string }>();
   const { data: team, isLoading: teamLoading } = useTeam(teamId);
-  const { data: members } = useTeamMembers(teamId);
   const { data: expenses, isLoading: expensesLoading } = useExpenses(teamId);
   const { data: balances } = useTeamBalances(teamId);
   const { mutate: voidExpense } = useVoidExpense(teamId);
-  const { mutateAsync: inviteMember } = useInviteMember(teamId);
   const [showCreateExpense, setShowCreateExpense] = useState(false);
   const [activeTab, setActiveTab] = useState<"expenses" | "members" | "balances" | "activity">("expenses");
 
@@ -236,16 +442,18 @@ export default function TeamPage() {
           )}
           {expensesLoading ? (
             <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-16" />
-              ))}
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}
             </div>
           ) : !expenses?.length ? (
             <p className="text-sm text-[hsl(var(--muted-foreground))]">No expenses yet.</p>
           ) : (
             <div className="space-y-2">
               {expenses.map((expense) => (
-                <ExpenseCard key={expense.id} expense={expense} />
+                <ExpenseCard
+                  key={expense.id}
+                  expense={expense}
+                  teamId={teamId}
+                />
               ))}
             </div>
           )}
@@ -253,23 +461,7 @@ export default function TeamPage() {
       )}
 
       {/* Members tab */}
-      {activeTab === "members" && (
-        <div className="space-y-3">
-          {members?.map((m) => (
-            <div key={m.user_id} className="flex items-center gap-3 p-3 border rounded-xl bg-[hsl(var(--card))]">
-              <Avatar name={m.display_name} size="sm" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{m.display_name}</p>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">{m.email}</p>
-              </div>
-              <Badge variant="secondary" className="text-xs">{m.role}</Badge>
-            </div>
-          ))}
-          {!members?.length && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No members found.</p>
-          )}
-        </div>
-      )}
+      {activeTab === "members" && <MembersTab teamId={teamId} />}
 
       {/* Balances tab */}
       {activeTab === "balances" && (

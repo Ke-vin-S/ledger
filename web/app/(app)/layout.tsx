@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 
 const navItems: { href: string; label: string; icon: React.ElementType }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/teams", label: "Teams", icon: Users },
   { href: "/loans", label: "Loans", icon: CreditCard },
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },

@@ -9,11 +9,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AmountInput } from "@/components/expense/AmountInput";
-import { useTeams } from "@/hooks/useTeam";
+import { MemberPicker, type PickedMember } from "@/components/expense/MemberPicker";
+import { SplitBuilder, type SplitMethod, type SplitEntry } from "@/components/expense/SplitBuilder";
+import { Avatar } from "@/components/shared/Avatar";
+import { useTeams, useTeamMembers, isAnonymousMember } from "@/hooks/useTeam";
+import { useMe } from "@/hooks/useAuth";
 import { useCreateExpense } from "@/hooks/useExpenses";
 import { ApiRequestError } from "@/lib/api";
 
-const SPLIT_METHODS = ["equal", "exact", "percentage", "shares"] as const;
+const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
+  { value: "equal", label: "Equal" },
+  { value: "exact", label: "Exact amounts" },
+  { value: "percentage", label: "Percentage" },
+  { value: "shares", label: "Shares / weights" },
+];
 
 const CURRENCIES = [
   { code: "LKR", label: "LKR — Sri Lanka Rupee" },
@@ -29,20 +38,27 @@ const schema = z.object({
   team_id: z.string().min(1, "Select a team"),
   title: z.string().min(1, "Title is required"),
   amount: z.number().int().positive("Amount must be positive"),
-  currency: z.string().min(1, "Currency is required"),
-  split_method: z.enum(SPLIT_METHODS),
+  currency: z.string().min(1),
+  split_method: z.enum(["equal", "exact", "percentage", "shares"]),
   expense_date: z.string().min(1, "Date is required"),
+  paid_by: z.string().min(1, "Select who paid"),
   note: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
 
 function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
   const { data: teams } = useTeams();
+  const { data: me } = useMe();
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
   const [amount, setAmount] = useState(0);
   const [currency, setCurrency] = useState("LKR");
+  const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
+  const [participants, setParticipants] = useState<string[]>([]);
+  const [participantObjects, setParticipantObjects] = useState<PickedMember[]>([]);
+  const [splits, setSplits] = useState<SplitEntry[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const { data: teamMembers } = useTeamMembers(selectedTeamId);
   const { mutateAsync, isPending } = useCreateExpense(selectedTeamId);
 
   const {
@@ -60,26 +76,49 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
     },
   });
 
+  function handleTeamChange(teamId: string) {
+    setSelectedTeamId(teamId);
+    setValue("team_id", teamId);
+    setParticipants([]);
+    setParticipantObjects([]);
+    setSplits([]);
+    // Default paid_by to current user
+    if (me) setValue("paid_by", me.id);
+  }
+
   async function onSubmit(data: FormValues) {
     if (!data.team_id) return;
+    if (participants.length === 0) {
+      setServerError("Select at least one participant to split with.");
+      return;
+    }
     setServerError(null);
     try {
-      await mutateAsync({
+      const payload: Parameters<typeof mutateAsync>[0] = {
         title: data.title,
         amount: data.amount,
         currency: data.currency,
         split_method: data.split_method,
         expense_date: data.expense_date,
+        paid_by: data.paid_by,
         note: data.note || undefined,
-      });
+        splits: splits.length > 0 ? splits : participants.map((id) => ({ user_id: id })),
+      };
+      await mutateAsync(payload);
       reset();
       setAmount(0);
+      setParticipants([]);
+      setParticipantObjects([]);
+      setSplits([]);
+      setSelectedTeamId("");
       onSuccess();
     } catch (err) {
       if (err instanceof ApiRequestError) setServerError(err.error.message);
       else setServerError("Failed to add expense.");
     }
   }
+
+  const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
@@ -89,91 +128,125 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
       )}
 
+      {/* Team */}
       <div className="space-y-1.5">
         <Label>Team</Label>
         <select
-          className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+          className={selectClass}
           {...register("team_id")}
-          onChange={(e) => {
-            setValue("team_id", e.target.value);
-            setSelectedTeamId(e.target.value);
-          }}
+          onChange={(e) => handleTeamChange(e.target.value)}
         >
           <option value="">Select a team…</option>
           {teams?.map((t) => (
             <option key={t.id} value={t.id}>{t.name}</option>
           ))}
         </select>
-        {errors.team_id && (
-          <p className="text-xs text-[hsl(var(--destructive))]">{errors.team_id.message}</p>
-        )}
+        {errors.team_id && <p className="text-xs text-[hsl(var(--destructive))]">{errors.team_id.message}</p>}
       </div>
 
+      {/* Title */}
       <div className="space-y-1.5">
         <Label>Title</Label>
         <Input placeholder="e.g. Dinner at Commons" {...register("title")} />
-        {errors.title && (
-          <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>
-        )}
+        {errors.title && <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>}
       </div>
 
+      {/* Currency + Date */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Currency</Label>
           <select
-            className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+            className={selectClass}
             {...register("currency")}
-            onChange={(e) => {
-              setValue("currency", e.target.value);
-              setCurrency(e.target.value);
-            }}
+            onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
             defaultValue="LKR"
           >
             {CURRENCIES.map(({ code, label }) => (
               <option key={code} value={code}>{label}</option>
             ))}
           </select>
-          {errors.currency && (
-            <p className="text-xs text-[hsl(var(--destructive))]">{errors.currency.message}</p>
-          )}
         </div>
-
         <div className="space-y-1.5">
           <Label>Date</Label>
           <Input type="date" {...register("expense_date")} />
-          {errors.expense_date && (
-            <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>
-          )}
+          {errors.expense_date && <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>}
         </div>
       </div>
 
+      {/* Amount */}
       <div className="space-y-1.5">
         <Label>Amount</Label>
         <AmountInput
           value={amount}
           currency={currency}
-          onChange={(v) => {
-            setAmount(v);
-            setValue("amount", v);
-          }}
+          onChange={(v) => { setAmount(v); setValue("amount", v); }}
         />
-        {errors.amount && (
-          <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>
-        )}
+        {errors.amount && <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>}
       </div>
 
+      {/* Paid by */}
+      {selectedTeamId && teamMembers && teamMembers.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>Paid by</Label>
+          <select
+            className={selectClass}
+            {...register("paid_by")}
+            defaultValue={me?.id ?? ""}
+          >
+            <option value="">Select who paid…</option>
+            {teamMembers.map((m) => (
+              <option key={m.user_id} value={m.user_id}>
+                {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
+              </option>
+            ))}
+          </select>
+          {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
+        </div>
+      )}
+
+      {/* Split method */}
       <div className="space-y-1.5">
         <Label>Split method</Label>
         <select
-          className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+          className={selectClass}
           {...register("split_method")}
+          onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
         >
-          {SPLIT_METHODS.map((m) => (
-            <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
+          {SPLIT_METHODS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
       </div>
 
+      {/* Participants */}
+      {selectedTeamId && (
+        <div className="space-y-2">
+          <Label>Participants</Label>
+          <MemberPicker
+            teamId={selectedTeamId}
+            selected={participants}
+            onChange={setParticipants}
+            onMembersChange={setParticipantObjects}
+          />
+        </div>
+      )}
+
+      {/* SplitBuilder — shown when participants selected and amount > 0 */}
+      {participants.length > 0 && amount > 0 && (
+        <div className="space-y-2 border rounded-xl p-3 bg-[hsl(var(--muted)/0.4)]">
+          <Label className="text-xs uppercase tracking-wide text-[hsl(var(--muted-foreground))]">Split preview</Label>
+          <SplitBuilder
+            participants={participantObjects}
+            total={amount}
+            currency={currency}
+            method={splitMethod}
+            value={splits}
+            onChange={setSplits}
+          />
+        </div>
+      )}
+
+      {/* Note */}
       <div className="space-y-1.5">
         <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(optional)</span></Label>
         <Input placeholder="Any additional details" {...register("note")} />
