@@ -1,8 +1,6 @@
 import { GraphQLClient } from "graphql-request";
 import { getAccessToken } from "../auth";
-
-const GRAPHQL_URL =
-  process.env.NEXT_PUBLIC_GRAPHQL_URL ?? "http://localhost:8080/graphql";
+import { GRAPHQL_URL } from "@/constants/config";
 
 export function getGraphQLClient(): GraphQLClient {
   const token = getAccessToken();

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useMe } from "@/hooks/useAuth";
-import { api, ApiRequestError } from "@/lib/api";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMe, useUpdateProfile, useUpdateCurrencyPref } from "@/hooks/useAuth";
+import { ApiRequestError } from "@/lib/api";
+import { CURRENCIES, SELECT_CLASS } from "@/constants/config";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,16 +14,6 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar } from "@/components/shared/Avatar";
 
-const CURRENCIES = [
-  { code: "LKR", label: "LKR — Sri Lanka Rupee" },
-  { code: "USD", label: "USD — US Dollar" },
-  { code: "EUR", label: "EUR — Euro" },
-  { code: "GBP", label: "GBP — British Pound" },
-  { code: "INR", label: "INR — Indian Rupee" },
-  { code: "SGD", label: "SGD — Singapore Dollar" },
-  { code: "AUD", label: "AUD — Australian Dollar" },
-];
-
 const profileSchema = z.object({
   display_name: z.string().min(1, "Name is required").max(80),
 });
@@ -31,7 +21,7 @@ type ProfileValues = z.infer<typeof profileSchema>;
 
 function ProfileSection() {
   const { data: me, isLoading } = useMe();
-  const qc = useQueryClient();
+  const { mutateAsync: updateProfile } = useUpdateProfile();
   const [serverError, setServerError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -46,8 +36,7 @@ function ProfileSection() {
     setServerError(null);
     setSaved(false);
     try {
-      await api.patch("/users/me", data);
-      await qc.invalidateQueries({ queryKey: ["users", "me"] });
+      await updateProfile(data);
       setSaved(true);
     } catch (err) {
       if (err instanceof ApiRequestError) setServerError(err.error.message);
@@ -95,8 +84,7 @@ function ProfileSection() {
 
 function CurrencySection() {
   const { data: me, isLoading } = useMe();
-  const qc = useQueryClient();
-  const [saving, setSaving] = useState(false);
+  const { mutateAsync: updateCurrencyPref, isPending: saving } = useUpdateCurrencyPref();
   const [saved, setSaved] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("");
@@ -107,19 +95,15 @@ function CurrencySection() {
 
   async function handleSave() {
     if (!selected || selected === currentCurrency) return;
-    setSaving(true);
     setSaved(false);
     setServerError(null);
     try {
-      await api.patch("/users/me", { currency_pref: selected });
-      await qc.invalidateQueries({ queryKey: ["users", "me"] });
+      await updateCurrencyPref(selected);
       setSaved(true);
       setSelected("");
     } catch (err) {
       if (err instanceof ApiRequestError) setServerError(err.error.message);
       else setServerError("Failed to update currency.");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -143,7 +127,7 @@ function CurrencySection() {
             <Label htmlFor="currency_pref">Currency</Label>
             <select
               id="currency_pref"
-              className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+              className={SELECT_CLASS}
               defaultValue={currentCurrency}
               onChange={(e) => setSelected(e.target.value)}
             >

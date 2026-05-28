@@ -10,15 +10,10 @@ import { Avatar } from "@/components/shared/Avatar";
 import { useRecordSettlement } from "@/hooks/useSettlements";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { SETTLEMENT_METHODS, SELECT_CLASS } from "@/constants/config";
+import type { SettlementMethod } from "@/types/settlement.types";
 
-const METHODS = [
-  { value: "cash", label: "Cash" },
-  { value: "bank_transfer", label: "Bank transfer" },
-  { value: "upi", label: "UPI" },
-  { value: "card", label: "Card" },
-  { value: "other", label: "Other" },
-] as const;
-type Method = typeof METHODS[number]["value"];
+type Method = SettlementMethod;
 
 type Props = {
   teamId: string;
@@ -59,7 +54,6 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
     }
   }
 
-  const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
   const needsNote = method === "upi" || method === "bank_transfer";
 
   return (
@@ -92,11 +86,11 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
           <div className="space-y-1.5">
             <Label>Payment method</Label>
             <select
-              className={selectClass}
+              className={SELECT_CLASS}
               value={method}
               onChange={(e) => setMethod(e.target.value as Method)}
             >
-              {METHODS.map(({ value, label }) => (
+              {SETTLEMENT_METHODS.map(({ value, label }) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>

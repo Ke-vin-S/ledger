@@ -2,39 +2,25 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-
-type Notification = {
-  id: string;
-  type: string;
-  entity_type: string;
-  entity_id: string;
-  payload?: Record<string, unknown>;
-  is_read: boolean;
-  read_at?: string;
-  created_at: string;
-};
-
-type NotificationPage = {
-  items: Notification[];
-  next_cursor?: string;
-  has_more: boolean;
-};
+import type { NotificationPage } from "@/types/notification.types";
+import { API_ENDPOINTS } from "@/constants/api";
+import { NOTIFICATION_POLL_INTERVAL } from "@/constants/config";
 
 export function useNotifications(unreadOnly = false) {
   return useQuery<NotificationPage>({
     queryKey: ["notifications", { unreadOnly }],
     queryFn: () =>
       api.get<NotificationPage>(
-        `/notifications${unreadOnly ? "?unread=true" : ""}`,
+        unreadOnly ? API_ENDPOINTS.notifications.unreadList : API_ENDPOINTS.notifications.list,
       ),
-    refetchInterval: 30_000,
+    refetchInterval: NOTIFICATION_POLL_INTERVAL,
   });
 }
 
 export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`/notifications/${id}/read`),
+    mutationFn: (id: string) => api.post(API_ENDPOINTS.notifications.read(id)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }
@@ -42,7 +28,7 @@ export function useMarkNotificationRead() {
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post("/notifications/read-all"),
+    mutationFn: () => api.post(API_ENDPOINTS.notifications.readAll),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }
@@ -50,7 +36,7 @@ export function useMarkAllRead() {
 export function useDismissNotification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete(`/notifications/${id}`),
+    mutationFn: (id: string) => api.delete(API_ENDPOINTS.notifications.dismiss(id)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }

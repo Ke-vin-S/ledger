@@ -6,17 +6,10 @@ import { AmountInput } from "@/components/expense/AmountInput";
 import { formatAmount } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertCircle } from "lucide-react";
-import type { PickedMember } from "@/components/expense/MemberPicker";
+import type { PickedMember } from "@/types/team.types";
+import type { SplitMethod, SplitEntry } from "@/types/expense.types";
 
-export type SplitMethod = "equal" | "exact" | "percentage" | "shares";
-
-export type SplitEntry = {
-  user_id: string;
-  /** Minor units — used for exact splits */
-  share_amount?: number;
-  /** Relative weight — used for shares/percentage */
-  share_units?: number;
-};
+export type { SplitMethod, SplitEntry };
 
 type Props = {
   participants: PickedMember[];

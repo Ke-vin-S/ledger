@@ -5,13 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Users, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-
-type TeamPreview = {
-  team_id: string;
-  team_name: string;
-  description?: string;
-  member_count: number;
-};
+import { ROUTES } from "@/constants/routes";
 
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>();
@@ -28,7 +22,7 @@ export default function InvitePage() {
       const res = await api.post<{ team_id: string }>(`/invite/${token}`);
       setTeamId(res.team_id);
       setSuccess(true);
-      setTimeout(() => router.push(`/teams/${res.team_id}`), 1500);
+      setTimeout(() => router.push(ROUTES.team(res.team_id) as never), 1500);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.error.message);
@@ -59,7 +53,7 @@ export default function InvitePage() {
         </div>
         <h1 className="text-2xl font-bold">Invite Invalid</h1>
         <p className="text-[hsl(var(--muted-foreground))] text-sm">{error}</p>
-        <a href="/dashboard" className="underline text-sm">Go to dashboard</a>
+        <a href={ROUTES.dashboard} className="underline text-sm">Go to dashboard</a>
       </div>
     );
   }
@@ -89,7 +83,7 @@ export default function InvitePage() {
       </Button>
       <p className="text-xs text-[hsl(var(--muted-foreground))]">
         You must be logged in to accept this invitation.{" "}
-        <a href="/login" className="underline">Log in</a>
+        <a href={ROUTES.login} className="underline">Log in</a>
       </p>
     </div>
   );

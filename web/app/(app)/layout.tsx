@@ -25,13 +25,15 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { Avatar } from "@/components/shared/Avatar";
 import { AddExpenseSheet } from "@/components/expense/AddExpenseSheet";
 import { cn } from "@/lib/utils";
+import { PAGE_TITLES } from "@/constants/config";
+import { ROUTES } from "@/constants/routes";
 
 const navItems: { href: string; label: string; icon: React.ElementType }[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/teams", label: "Teams", icon: Users },
-  { href: "/loans", label: "Loans", icon: CreditCard },
-  { href: "/notifications", label: "Notifications", icon: Bell },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: ROUTES.dashboard, label: "Dashboard", icon: LayoutDashboard },
+  { href: ROUTES.teams, label: "Teams", icon: Users },
+  { href: ROUTES.loans, label: "Loans", icon: CreditCard },
+  { href: ROUTES.notifications, label: "Notifications", icon: Bell },
+  { href: ROUTES.settings, label: "Settings", icon: Settings },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -45,7 +47,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && isError) {
-      router.push("/login");
+      router.push(ROUTES.login);
     }
   }, [isLoading, isError, router]);
 
@@ -64,13 +66,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const unreadCount = notifications?.items.length ?? 0;
 
-  const PAGE_TITLES: Record<string, string> = {
-    "/dashboard": "Dashboard",
-    "/loans": "Loans & Balances",
-    "/notifications": "Notifications",
-    "/settings": "Settings",
-    "/teams": "Teams",
-  };
   const pageTitle = PAGE_TITLES[pathname] ?? null;
 
   const isDarkMode =
@@ -100,7 +95,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
           {sidebarOpen && (
             <Link
-              href="/dashboard"
+              href={ROUTES.dashboard}
               className="flex-1 text-center [font-family:var(--font-serif)] font-bold text-xl tracking-tight text-[hsl(var(--foreground))] hover:opacity-70 transition-opacity"
             >
               SplitLedger
@@ -155,7 +150,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
                 <div className="relative flex-shrink-0">
                   <Icon className="h-[1.05rem] w-[1.05rem]" />
-                  {href === "/notifications" && unreadCount > 0 && (
+                  {href === ROUTES.notifications && unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1.5 h-3.5 w-3.5 rounded-full bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] text-[7px] flex items-center justify-center font-bold">
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
@@ -178,7 +173,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   return (
                     <Link
                       key={team.id}
-                      href={`/teams/${team.id}` as never}
+                      href={ROUTES.team(team.id) as never}
                       className={cn(
                         "flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.82rem] transition-all duration-100 truncate relative",
                         isActive
@@ -198,7 +193,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   );
                 })}
                 <Link
-                  href="/teams"
+                  href={ROUTES.teams}
                   className="flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.78rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] transition-colors"
                 >
                   <Plus className="h-3 w-3" />
@@ -210,7 +205,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {!sidebarOpen && (
             <Link
-              href="/teams"
+              href={ROUTES.teams}
               className="flex items-center justify-center py-2 rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] transition-colors"
             >
               <Users className="h-[1.05rem] w-[1.05rem]" />

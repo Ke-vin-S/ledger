@@ -1,6 +1,7 @@
 import { getAccessToken, setAccessToken } from "./auth";
+import { API_BASE_URL } from "@/constants/config";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/v1";
+const BASE = API_BASE_URL;
 
 type ApiError = {
   code: string;
@@ -76,7 +77,7 @@ async function request<T>(
     if (refreshed) return request<T>(path, init, false);
     // Refresh failed — redirect to login
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      window.location.href = "/login"; // avoid circular import — ROUTES not used here
     }
     throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
   }

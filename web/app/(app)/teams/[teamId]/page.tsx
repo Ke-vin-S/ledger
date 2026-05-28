@@ -20,8 +20,10 @@ import { useTeamBalances } from "@/hooks/useSettlements";
 import { ActivityFeed } from "@/components/team/ActivityFeed";
 import { ExpenseCard } from "@/components/expense/ExpenseCard";
 import { AmountInput } from "@/components/expense/AmountInput";
-import { MemberPicker, type PickedMember } from "@/components/expense/MemberPicker";
-import { SplitBuilder, type SplitMethod, type SplitEntry } from "@/components/expense/SplitBuilder";
+import { MemberPicker } from "@/components/expense/MemberPicker";
+import { SplitBuilder } from "@/components/expense/SplitBuilder";
+import type { PickedMember } from "@/types/team.types";
+import type { SplitMethod, SplitEntry } from "@/types/expense.types";
 import { DebtBar } from "@/components/settlement/DebtBar";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { Avatar } from "@/components/shared/Avatar";
@@ -33,15 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, UserPlus, UserX, Link2, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
-  { value: "equal", label: "Equal" },
-  { value: "exact", label: "Exact amounts" },
-  { value: "percentage", label: "Percentage" },
-  { value: "shares", label: "Shares / weights" },
-];
-
-const CURRENCIES = ["LKR", "USD", "EUR", "GBP", "INR", "SGD", "AUD"] as const;
+import { CURRENCY_CODES, SPLIT_METHODS, SELECT_CLASS } from "@/constants/config";
 
 const expenseSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -53,8 +47,6 @@ const expenseSchema = z.object({
   note: z.string().optional(),
 });
 type ExpenseFormValues = z.infer<typeof expenseSchema>;
-
-const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
 
 function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () => void }) {
   const { data: me } = useMe();
@@ -124,12 +116,12 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
             <div className="space-y-1.5">
               <Label>Currency</Label>
               <select
-                className={selectClass}
+                className={SELECT_CLASS}
                 {...register("currency")}
                 onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
                 defaultValue="LKR"
               >
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {CURRENCY_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
@@ -149,7 +141,7 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
           {teamMembers && teamMembers.length > 0 && (
             <div className="space-y-1.5">
               <Label>Paid by</Label>
-              <select className={selectClass} {...register("paid_by")} defaultValue={me?.id ?? ""}>
+              <select className={SELECT_CLASS} {...register("paid_by")} defaultValue={me?.id ?? ""}>
                 <option value="">Select who paid…</option>
                 {teamMembers.map((m) => (
                   <option key={m.user_id} value={m.user_id}>
@@ -165,7 +157,7 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
             <div className="space-y-1.5">
               <Label>Split method</Label>
               <select
-                className={selectClass}
+                className={SELECT_CLASS}
                 {...register("split_method")}
                 onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
               >

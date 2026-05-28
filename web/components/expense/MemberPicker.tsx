@@ -7,12 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Plus, Check, UserX } from "lucide-react";
+import type { PickedMember } from "@/types/team.types";
 
-export type PickedMember = {
-  id: string;
-  name: string;
-  isAnonymous?: boolean;
-};
+export type { PickedMember };
 
 type Props = {
   teamId: string;

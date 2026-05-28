@@ -24,6 +24,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronUp, ArrowLeft, Check, X, AlertTriangle } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
+import { SETTLEMENT_STATUS_COLORS } from "@/constants/config";
+import { ROUTES } from "@/constants/routes";
 
 const correctionSchema = z.object({
   title: z.string().min(1),
@@ -31,12 +33,6 @@ const correctionSchema = z.object({
   correction_reason: z.string().min(1, "Reason is required"),
 });
 type CorrectionValues = z.infer<typeof correctionSchema>;
-
-const STATUS_COLORS: Record<string, string> = {
-  pending_confirmation: "text-[hsl(var(--warning,40_96%_40%))] bg-amber-50 dark:bg-amber-950/30 border-amber-200",
-  confirmed: "text-[hsl(var(--primary))] bg-blue-50 dark:bg-blue-950/30 border-blue-200",
-  disputed: "text-[hsl(var(--destructive))] bg-red-50 dark:bg-red-950/30 border-red-200",
-};
 
 export default function ExpenseDetailPage() {
   const { teamId, expenseId } = useParams<{ teamId: string; expenseId: string }>();
@@ -89,7 +85,7 @@ export default function ExpenseDetailPage() {
     if (!voidReason.trim()) return;
     voidExpense({ expenseId, reason: voidReason });
     setShowVoidConfirm(false);
-    router.push(`/teams/${teamId}`);
+    router.push(ROUTES.team(teamId) as never);
   }
 
   if (isLoading) {
@@ -110,7 +106,7 @@ export default function ExpenseDetailPage() {
     <div className="p-8 space-y-6 max-w-2xl">
       {/* Back */}
       <button
-        onClick={() => router.push(`/teams/${teamId}`)}
+        onClick={() => router.push(ROUTES.team(teamId) as never)}
         className="flex items-center gap-1.5 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -196,7 +192,7 @@ export default function ExpenseDetailPage() {
                 const isMe = s.payer_id === me?.id || s.payee_id === me?.id;
                 const canAct = s.status === "pending_confirmation" && s.payee_id === me?.id;
                 return (
-                  <div key={s.id} className={cn("p-3 rounded-lg border text-sm", STATUS_COLORS[s.status] ?? "border-[hsl(var(--border))]")}>
+                  <div key={s.id} className={cn("p-3 rounded-lg border text-sm", SETTLEMENT_STATUS_COLORS[s.status] ?? "border-[hsl(var(--border))]")}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <Avatar name={payer?.display_name ?? s.payer_id} size="sm" className="h-5 w-5 text-[0.5rem]" />

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { UserCheck, AlertCircle, Loader2 } from "lucide-react";
+import { ROUTES } from "@/constants/routes";
 
 export default function ClaimPage() {
   const { token } = useParams<{ token: string }>();
@@ -18,7 +19,7 @@ export default function ClaimPage() {
     try {
       // Backend expects { claim_token } and returns the user profile (no new JWT needed)
       await api.post(`/users/claim`, { claim_token: token });
-      router.push("/dashboard");
+      router.push(ROUTES.dashboard);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.error.message);
@@ -37,7 +38,7 @@ export default function ClaimPage() {
         </div>
         <h1 className="text-2xl font-bold">Claim Failed</h1>
         <p className="text-[hsl(var(--muted-foreground))] text-sm">{error}</p>
-        <a href="/login" className="underline text-sm">
+        <a href={ROUTES.login} className="underline text-sm">
           Go to login
         </a>
       </div>

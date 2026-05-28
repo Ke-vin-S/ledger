@@ -1,0 +1,15 @@
+export const ROUTES = {
+  home: "/",
+  login: "/login",
+  register: "/register",
+  dashboard: "/dashboard",
+  teams: "/teams",
+  team: (teamId: string) => `/teams/${teamId}`,
+  teamExpense: (teamId: string, expenseId: string) => `/teams/${teamId}/expenses/${expenseId}`,
+  loans: "/loans",
+  loanDetail: (id: string) => `/loans/${id}`,
+  notifications: "/notifications",
+  settings: "/settings",
+  invite: (token: string) => `/invite/${token}`,
+  claim: (token: string) => `/claim/${token}`,
+} as const;

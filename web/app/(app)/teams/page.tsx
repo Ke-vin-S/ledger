@@ -14,16 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowRight, Plus } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
-
-const CURRENCIES = [
-  { code: "LKR", label: "LKR — Sri Lanka Rupee" },
-  { code: "USD", label: "USD — US Dollar" },
-  { code: "EUR", label: "EUR — Euro" },
-  { code: "GBP", label: "GBP — British Pound" },
-  { code: "INR", label: "INR — Indian Rupee" },
-  { code: "SGD", label: "SGD — Singapore Dollar" },
-  { code: "AUD", label: "AUD — Australian Dollar" },
-];
+import { CURRENCIES, SELECT_CLASS } from "@/constants/config";
+import { ROUTES } from "@/constants/routes";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(80),
@@ -82,7 +74,7 @@ function CreateTeamForm({ defaultCurrency, onClose }: { defaultCurrency: string;
             <Label htmlFor="currency">Currency</Label>
             <select
               id="currency"
-              className="w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+              className={SELECT_CLASS}
               {...register("currency")}
             >
               {CURRENCIES.map(({ code, label }) => (
@@ -148,7 +140,7 @@ export default function TeamsPage() {
           {teams.map((team) => (
             <Link
               key={team.id}
-              href={`/teams/${team.id}` as never}
+              href={ROUTES.team(team.id) as never}
               className="flex items-center justify-between p-4 rounded-xl border bg-[hsl(var(--card))] hover:bg-[hsl(var(--muted))] transition-colors"
             >
               <div>

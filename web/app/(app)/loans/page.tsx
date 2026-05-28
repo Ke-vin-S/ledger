@@ -22,15 +22,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-const CURRENCIES = ["LKR", "USD", "EUR", "GBP", "INR", "SGD", "AUD"] as const;
-
-const STATUS_BADGE: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
-  outstanding: { label: "Outstanding", variant: "outline" },
-  partially_repaid: { label: "Partial", variant: "secondary" },
-  settled: { label: "Settled", variant: "default" },
-  disputed: { label: "Disputed", variant: "destructive" },
-};
+import { CURRENCY_CODES, LOAN_STATUS_BADGE_SHORT, SELECT_CLASS } from "@/constants/config";
+import { ROUTES } from "@/constants/routes";
 
 const loanSchema = z.object({
   direction: z.enum(["lent", "borrowed"]),
@@ -58,8 +51,6 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
   });
 
   const selectedDirection = watch("direction");
-
-  const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
 
   async function onSubmit(data: LoanFormValues) {
     setServerError("");
@@ -119,12 +110,12 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="space-y-1.5">
           <Label>Currency</Label>
           <select
-            className={selectClass}
+            className={SELECT_CLASS}
             {...register("currency")}
             onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
             defaultValue="LKR"
           >
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {CURRENCY_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div className="space-y-1.5">
@@ -222,9 +213,9 @@ export default function LoansPage() {
           ) : (
             <div className="space-y-2">
               {loans.map((loan) => {
-                const statusInfo = STATUS_BADGE[loan.status] ?? { label: loan.status, variant: "outline" as const };
+                const statusInfo = LOAN_STATUS_BADGE_SHORT[loan.status] ?? { label: loan.status, variant: "outline" as const };
                 return (
-                  <Link key={loan.id} href={`/loans/${loan.id}`}>
+                  <Link key={loan.id} href={ROUTES.loanDetail(loan.id) as never}>
                     <div className="p-4 border rounded-xl bg-[hsl(var(--card))] hover:bg-[hsl(var(--muted))] transition-colors cursor-pointer">
                       <div className="flex items-center gap-3">
                         <Avatar name={loan.counterparty_name} size="md" />

@@ -1,0 +1,50 @@
+export const API_ENDPOINTS = {
+  auth: {
+    login: "/auth/login",
+    register: "/auth/register",
+    refresh: "/auth/refresh",
+    logout: "/auth/logout",
+  },
+  users: {
+    me: "/users/me",
+    anonymous: "/users/anonymous",
+    anonClaimToken: (userId: string) => `/users/anonymous/${userId}/claim-token`,
+    claim: "/users/claim",
+  },
+  teams: {
+    list: "/teams",
+    detail: (teamId: string) => `/teams/${teamId}`,
+    members: (teamId: string) => `/teams/${teamId}/members`,
+    addAnonymous: (teamId: string) => `/teams/${teamId}/members/anonymous`,
+    invite: (teamId: string) => `/teams/${teamId}/members/invite`,
+    removeMember: (teamId: string, userId: string) => `/teams/${teamId}/members/${userId}`,
+    expenses: (teamId: string) => `/teams/${teamId}/expenses`,
+    expense: (teamId: string, expenseId: string) => `/teams/${teamId}/expenses/${expenseId}`,
+    balances: (teamId: string) => `/teams/${teamId}/balances`,
+  },
+  expenses: {
+    detail: (expenseId: string) => `/expenses/${expenseId}`,
+    settlements: (expenseId: string) => `/expenses/${expenseId}/settlements`,
+  },
+  settlements: {
+    confirm: (settlementId: string) => `/settlements/${settlementId}/confirm`,
+    dispute: (settlementId: string) => `/settlements/${settlementId}/dispute`,
+  },
+  loans: {
+    list: "/loans",
+    listFiltered: (direction: string) => `/loans?direction=${direction}`,
+    detail: (id: string) => `/loans/${id}`,
+    acknowledge: (id: string) => `/loans/${id}/acknowledge`,
+    dispute: (id: string) => `/loans/${id}/dispute`,
+    claimText: (id: string) => `/loans/${id}/claim-text`,
+  },
+  notifications: {
+    list: "/notifications",
+    unreadList: "/notifications?unread=true",
+    read: (id: string) => `/notifications/${id}/read`,
+    readAll: "/notifications/read-all",
+    dismiss: (id: string) => `/notifications/${id}`,
+  },
+  invite: (token: string) => `/invite/${token}`,
+  balances: "/balances",
+} as const;

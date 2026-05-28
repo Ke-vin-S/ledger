@@ -15,13 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, ArrowUpRight, ArrowDownLeft, Copy, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
-
-const STATUS_BADGE: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
-  outstanding: { label: "Outstanding", variant: "outline" },
-  partially_repaid: { label: "Partially repaid", variant: "secondary" },
-  settled: { label: "Settled", variant: "default" },
-  disputed: { label: "Disputed", variant: "destructive" },
-};
+import { LOAN_STATUS_BADGE } from "@/constants/config";
+import { ROUTES } from "@/constants/routes";
 
 export default function LoanDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -74,7 +69,7 @@ export default function LoanDetailPage() {
 
   if (!loan) return null;
 
-  const statusInfo = STATUS_BADGE[loan.status] ?? { label: loan.status, variant: "outline" as const };
+  const statusInfo = LOAN_STATUS_BADGE[loan.status] ?? { label: loan.status, variant: "outline" as const };
   const repaid = loan.repayments?.reduce((s, r) => s + r.amount, 0) ?? 0;
   const outstanding = loan.amount - repaid;
 
@@ -82,7 +77,7 @@ export default function LoanDetailPage() {
     <div className="p-8 space-y-6 max-w-lg">
       {/* Back */}
       <button
-        onClick={() => router.push("/loans")}
+        onClick={() => router.push(ROUTES.loans)}
         className="flex items-center gap-1.5 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />

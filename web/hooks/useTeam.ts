@@ -2,27 +2,10 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { Team, Member } from "@/types/team.types";
+import { API_ENDPOINTS } from "@/constants/api";
 
-export type Team = {
-  id: string;
-  name: string;
-  description?: string;
-  currency: string;
-  is_public: boolean;
-  owner_id: string;
-  created_at: string;
-};
-
-// Matches memberResponse from the backend — no email field
-export type Member = {
-  id: string;
-  user_id: string;
-  display_name: string;
-  identity_type: string; // "registered" | "anonymous" | "google"
-  role: string;
-  status: string;
-  joined_at?: string;
-};
+export type { Team, Member };
 
 export function isAnonymousMember(m: Member): boolean {
   return m.identity_type === "anonymous";
@@ -31,14 +14,14 @@ export function isAnonymousMember(m: Member): boolean {
 export function useTeams() {
   return useQuery<Team[]>({
     queryKey: ["teams"],
-    queryFn: () => api.get<Team[]>("/teams"),
+    queryFn: () => api.get<Team[]>(API_ENDPOINTS.teams.list),
   });
 }
 
 export function useTeam(teamId: string) {
   return useQuery<Team>({
     queryKey: ["teams", teamId],
-    queryFn: () => api.get<Team>(`/teams/${teamId}`),
+    queryFn: () => api.get<Team>(API_ENDPOINTS.teams.detail(teamId)),
     enabled: !!teamId,
   });
 }
@@ -46,7 +29,7 @@ export function useTeam(teamId: string) {
 export function useTeamMembers(teamId: string) {
   return useQuery<Member[]>({
     queryKey: ["teams", teamId, "members"],
-    queryFn: () => api.get<Member[]>(`/teams/${teamId}/members`),
+    queryFn: () => api.get<Member[]>(API_ENDPOINTS.teams.members(teamId)),
     enabled: !!teamId,
   });
 }
@@ -54,27 +37,27 @@ export function useTeamMembers(teamId: string) {
 export function useCreateTeam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; description?: string; currency: string; is_public?: boolean }) =>
-      api.post<Team>("/teams", data),
+    mutationFn: (data: {
+      name: string;
+      description?: string;
+      currency: string;
+      is_public?: boolean;
+    }) => api.post<Team>(API_ENDPOINTS.teams.list, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["teams"] }),
   });
 }
 
-// Two-step: create anon user, then add to team
 export function useAddAnonymousMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: { display_name: string }): Promise<Member> => {
-      // Step 1: create the anonymous user
       const anonUser = await api.post<{ id: string; display_name: string; identity_type: string }>(
-        "/users/anonymous",
+        API_ENDPOINTS.users.anonymous,
         { display_name: data.display_name },
       );
-      // Step 2: add to team
-      return api.post<Member>(`/teams/${teamId}/members/anonymous`, { user_id: anonUser.id });
+      return api.post<Member>(API_ENDPOINTS.teams.addAnonymous(teamId), { user_id: anonUser.id });
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
   });
 }
 
@@ -82,7 +65,7 @@ export function useGenerateClaimToken() {
   return useMutation({
     mutationFn: (userId: string) =>
       api.post<{ claim_url: string; token: string; expires_at: string }>(
-        `/users/anonymous/${userId}/claim-token`,
+        API_ENDPOINTS.users.anonClaimToken(userId),
       ),
   });
 }
@@ -91,19 +74,16 @@ export function useRemoveMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (userId: string) =>
-      api.delete(`/teams/${teamId}/members/${userId}`),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
+      api.delete(API_ENDPOINTS.teams.removeMember(teamId, userId)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
   });
 }
 
-// Backend only accepts { email } — role changes go through PATCH /:uid/role
 export function useInviteMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { email: string }) =>
-      api.post(`/teams/${teamId}/members/invite`, { email: data.email }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
+      api.post(API_ENDPOINTS.teams.invite(teamId), { email: data.email }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
   });
 }

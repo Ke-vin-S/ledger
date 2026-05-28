@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/api";
 import { setAccessToken } from "@/lib/auth";
+import { ROUTES } from "@/constants/routes";
 
 const schema = z.object({
   display_name: z.string().min(1, "Name is required").max(80, "Name too long"),
@@ -31,7 +32,7 @@ export default function RegisterPage() {
     try {
       const res = await api.post<{ access_token: string }>("/auth/register", data);
       setAccessToken(res.access_token);
-      router.push("/dashboard");
+      router.push(ROUTES.dashboard);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setServerError(err.error.message);
@@ -116,7 +117,7 @@ export default function RegisterPage() {
 
       <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
         Already have an account?{" "}
-        <Link href="/login" className="underline hover:text-[hsl(var(--foreground))]">
+        <Link href={ROUTES.login} className="underline hover:text-[hsl(var(--foreground))]">
           Sign in
         </Link>
       </p>

@@ -9,30 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AmountInput } from "@/components/expense/AmountInput";
-import { MemberPicker, type PickedMember } from "@/components/expense/MemberPicker";
-import { SplitBuilder, type SplitMethod, type SplitEntry } from "@/components/expense/SplitBuilder";
+import { MemberPicker } from "@/components/expense/MemberPicker";
+import { SplitBuilder } from "@/components/expense/SplitBuilder";
 import { Avatar } from "@/components/shared/Avatar";
 import { useTeams, useTeamMembers, isAnonymousMember } from "@/hooks/useTeam";
 import { useMe } from "@/hooks/useAuth";
 import { useCreateExpense } from "@/hooks/useExpenses";
 import { ApiRequestError } from "@/lib/api";
-
-const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
-  { value: "equal", label: "Equal" },
-  { value: "exact", label: "Exact amounts" },
-  { value: "percentage", label: "Percentage" },
-  { value: "shares", label: "Shares / weights" },
-];
-
-const CURRENCIES = [
-  { code: "LKR", label: "LKR — Sri Lanka Rupee" },
-  { code: "USD", label: "USD — US Dollar" },
-  { code: "EUR", label: "EUR — Euro" },
-  { code: "GBP", label: "GBP — British Pound" },
-  { code: "INR", label: "INR — Indian Rupee" },
-  { code: "SGD", label: "SGD — Singapore Dollar" },
-  { code: "AUD", label: "AUD — Australian Dollar" },
-];
+import { CURRENCIES, SPLIT_METHODS, SELECT_CLASS } from "@/constants/config";
+import type { SplitMethod, SplitEntry } from "@/types/expense.types";
+import type { PickedMember } from "@/types/team.types";
 
 const schema = z.object({
   team_id: z.string().min(1, "Select a team"),
@@ -82,7 +68,6 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
     setParticipants([]);
     setParticipantObjects([]);
     setSplits([]);
-    // Default paid_by to current user
     if (me) setValue("paid_by", me.id);
   }
 
@@ -118,8 +103,6 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
     }
   }
 
-  const selectClass = "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
-
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       {serverError && (
@@ -132,7 +115,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="space-y-1.5">
         <Label>Team</Label>
         <select
-          className={selectClass}
+          className={SELECT_CLASS}
           {...register("team_id")}
           onChange={(e) => handleTeamChange(e.target.value)}
         >
@@ -156,7 +139,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="space-y-1.5">
           <Label>Currency</Label>
           <select
-            className={selectClass}
+            className={SELECT_CLASS}
             {...register("currency")}
             onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
             defaultValue="LKR"
@@ -189,7 +172,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="space-y-1.5">
           <Label>Paid by</Label>
           <select
-            className={selectClass}
+            className={SELECT_CLASS}
             {...register("paid_by")}
             defaultValue={me?.id ?? ""}
           >
@@ -208,7 +191,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="space-y-1.5">
         <Label>Split method</Label>
         <select
-          className={selectClass}
+          className={SELECT_CLASS}
           {...register("split_method")}
           onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
         >
@@ -231,7 +214,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
       )}
 
-      {/* SplitBuilder — shown when participants selected and amount > 0 */}
+      {/* SplitBuilder */}
       {participants.length > 0 && amount > 0 && (
         <div className="space-y-2 border rounded-xl p-3 bg-[hsl(var(--muted)/0.4)]">
           <Label className="text-xs uppercase tracking-wide text-[hsl(var(--muted-foreground))]">Split preview</Label>
