@@ -66,18 +66,20 @@ type DebtBalance struct {
 	DebtStatus   string     `json:"debt_status"`
 }
 
-// TeamNetBalance is a net balance between two users within a team.
-type TeamNetBalance struct {
-	TeamID    uuid.UUID `json:"team_id"`
-	UserA     uuid.UUID `json:"user_a"`
-	UserB     uuid.UUID `json:"user_b"`
-	NetAmount int64     `json:"net_amount"`
+// TeamBalance is a net balance between the current user and one team counterparty.
+// NetAmount > 0 means the counterparty owes the actor; < 0 means the actor owes them.
+type TeamBalance struct {
+	CounterpartyID   uuid.UUID `json:"counterparty_id"`
+	CounterpartyName string    `json:"counterparty_name"`
+	NetAmount        int64     `json:"net_amount"`
 }
 
-// UserNetBalance is a net balance between a user and one counterparty across all teams.
-type UserNetBalance struct {
-	CounterpartyID uuid.UUID `json:"counterparty_id"`
-	NetAmount      int64     `json:"net_amount"`
+// UserBalance is a net balance between the current user and one counterparty across all teams.
+// NetAmount > 0 means the counterparty owes the actor; < 0 means the actor owes them.
+type UserBalance struct {
+	CounterpartyID   uuid.UUID `json:"counterparty_id"`
+	CounterpartyName string    `json:"counterparty_name"`
+	NetAmount        int64     `json:"net_amount"`
 }
 
 // RecordInput is the argument for Service.RecordSettlement.

@@ -221,17 +221,18 @@ func (h *Handler) disputeSettlement(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) teamBalances(w http.ResponseWriter, r *http.Request) {
+	actorID := jwtauth.MustUserID(r.Context())
 	teamID, ok := parseUUID(w, r, chi.URLParam(r, "teamId"))
 	if !ok {
 		return
 	}
-	balances, err := h.svc.ListTeamBalances(r.Context(), teamID)
+	balances, err := h.svc.ListTeamBalances(r.Context(), teamID, actorID)
 	if err != nil {
 		handleErr(w, r, err)
 		return
 	}
 	if balances == nil {
-		balances = []*settlement.TeamNetBalance{}
+		balances = []*settlement.TeamBalance{}
 	}
 	respondJSON(w, r, http.StatusOK, map[string]any{"data": balances})
 }
@@ -244,7 +245,7 @@ func (h *Handler) myBalances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if balances == nil {
-		balances = []*settlement.UserNetBalance{}
+		balances = []*settlement.UserBalance{}
 	}
 	respondJSON(w, r, http.StatusOK, map[string]any{"data": balances})
 }

@@ -19,6 +19,6 @@ type Repository interface {
 
 	// Balance views
 	GetDebtBalance(ctx context.Context, expenseID, debtorID uuid.UUID) (*DebtBalance, error)
-	ListTeamNetBalances(ctx context.Context, teamID uuid.UUID) ([]*TeamNetBalance, error)
-	ListUserNetBalances(ctx context.Context, userID uuid.UUID) ([]*UserNetBalance, error)
+	ListTeamNetBalances(ctx context.Context, teamID, actorID uuid.UUID) ([]*TeamBalance, error)
+	ListUserNetBalances(ctx context.Context, userID uuid.UUID) ([]*UserBalance, error)
 }

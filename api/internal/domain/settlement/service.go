@@ -137,10 +137,10 @@ func (s *Service) ListSettlementsByExpense(ctx context.Context, expenseID uuid.U
 	return s.repo.ListByExpense(ctx, expenseID)
 }
 
-func (s *Service) ListTeamBalances(ctx context.Context, teamID uuid.UUID) ([]*TeamNetBalance, error) {
-	return s.repo.ListTeamNetBalances(ctx, teamID)
+func (s *Service) ListTeamBalances(ctx context.Context, teamID, actorID uuid.UUID) ([]*TeamBalance, error) {
+	return s.repo.ListTeamNetBalances(ctx, teamID, actorID)
 }
 
-func (s *Service) ListMyBalances(ctx context.Context, userID uuid.UUID) ([]*UserNetBalance, error) {
+func (s *Service) ListMyBalances(ctx context.Context, userID uuid.UUID) ([]*UserBalance, error) {
 	return s.repo.ListUserNetBalances(ctx, userID)
 }

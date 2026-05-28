@@ -147,22 +147,26 @@ func (r *settlementRepo) GetDebtBalance(ctx context.Context, expenseID, debtorID
 	return &d, nil
 }
 
-func (r *settlementRepo) ListTeamNetBalances(ctx context.Context, teamID uuid.UUID) ([]*settlement.TeamNetBalance, error) {
+func (r *settlementRepo) ListTeamNetBalances(ctx context.Context, teamID, actorID uuid.UUID) ([]*settlement.TeamBalance, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT team_id, user_a, user_b, net_amount
-		FROM team_net_balances
-		WHERE team_id = $1
-		ORDER BY user_a, user_b
-	`, teamID)
+		SELECT
+			CASE WHEN user_a = $2 THEN user_b ELSE user_a END AS counterparty_id,
+			u.display_name AS counterparty_name,
+			CASE WHEN user_a = $2 THEN net_amount ELSE -net_amount END AS net_amount
+		FROM team_net_balances tnb
+		JOIN users u ON u.id = CASE WHEN user_a = $2 THEN user_b ELSE user_a END
+		WHERE tnb.team_id = $1 AND (tnb.user_a = $2 OR tnb.user_b = $2)
+		ORDER BY ABS(CASE WHEN user_a = $2 THEN net_amount ELSE -net_amount END) DESC
+	`, teamID, actorID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []*settlement.TeamNetBalance
+	var out []*settlement.TeamBalance
 	for rows.Next() {
-		var nb settlement.TeamNetBalance
-		if err := rows.Scan(&nb.TeamID, &nb.UserA, &nb.UserB, &nb.NetAmount); err != nil {
+		var nb settlement.TeamBalance
+		if err := rows.Scan(&nb.CounterpartyID, &nb.CounterpartyName, &nb.NetAmount); err != nil {
 			return nil, err
 		}
 		out = append(out, &nb)
@@ -170,22 +174,34 @@ func (r *settlementRepo) ListTeamNetBalances(ctx context.Context, teamID uuid.UU
 	return out, rows.Err()
 }
 
-func (r *settlementRepo) ListUserNetBalances(ctx context.Context, userID uuid.UUID) ([]*settlement.UserNetBalance, error) {
+func (r *settlementRepo) ListUserNetBalances(ctx context.Context, userID uuid.UUID) ([]*settlement.UserBalance, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT counterparty_id, net_amount
-		FROM user_net_balances
-		WHERE user_id = $1
-		ORDER BY net_amount DESC
+		SELECT counterparty_id, u.display_name, SUM(net_amount) AS net_amount
+		FROM (
+			SELECT creditor_id AS counterparty_id, -SUM(balance) AS net_amount
+			FROM debt_balances
+			WHERE debtor_id = $1
+			GROUP BY creditor_id
+			UNION ALL
+			SELECT debtor_id AS counterparty_id, SUM(balance) AS net_amount
+			FROM debt_balances
+			WHERE creditor_id = $1
+			GROUP BY debtor_id
+		) sub
+		JOIN users u ON u.id = sub.counterparty_id
+		GROUP BY counterparty_id, u.display_name
+		HAVING SUM(net_amount) != 0
+		ORDER BY ABS(SUM(net_amount)) DESC
 	`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []*settlement.UserNetBalance
+	var out []*settlement.UserBalance
 	for rows.Next() {
-		var nb settlement.UserNetBalance
-		if err := rows.Scan(&nb.CounterpartyID, &nb.NetAmount); err != nil {
+		var nb settlement.UserBalance
+		if err := rows.Scan(&nb.CounterpartyID, &nb.CounterpartyName, &nb.NetAmount); err != nil {
 			return nil, err
 		}
 		out = append(out, &nb)

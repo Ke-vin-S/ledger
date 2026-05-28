@@ -81,11 +81,11 @@ func (r *fakeRepo) GetDebtBalance(_ context.Context, _, _ uuid.UUID) (*settlemen
 	return r.balance, nil
 }
 
-func (r *fakeRepo) ListTeamNetBalances(_ context.Context, _ uuid.UUID) ([]*settlement.TeamNetBalance, error) {
+func (r *fakeRepo) ListTeamNetBalances(_ context.Context, _, _ uuid.UUID) ([]*settlement.TeamBalance, error) {
 	return nil, nil
 }
 
-func (r *fakeRepo) ListUserNetBalances(_ context.Context, _ uuid.UUID) ([]*settlement.UserNetBalance, error) {
+func (r *fakeRepo) ListUserNetBalances(_ context.Context, _ uuid.UUID) ([]*settlement.UserBalance, error) {
 	return nil, nil
 }
 
