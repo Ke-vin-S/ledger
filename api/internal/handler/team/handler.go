@@ -349,7 +349,7 @@ func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 		h.handleError(w, r, err)
 		return
 	}
-	inviteURL := h.frontendURL + "/join/" + rawToken
+	inviteURL := h.frontendURL + "/invite/" + rawToken
 	handler.JSON(w, r, http.StatusCreated, inviteLinkResponse{
 		ID:         link.ID,
 		InviteURL:  inviteURL,
