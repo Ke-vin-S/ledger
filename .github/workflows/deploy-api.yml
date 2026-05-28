@@ -67,15 +67,15 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ap-southeast-1
+          aws-region: ap-south-1
 
       - name: Deploy
         run: |
           aws lambda update-function-code \
             --function-name splitleger-api \
             --zip-file fileb://function.zip \
-            --region ap-southeast-1
+            --region ap-south-1
 
           aws lambda wait function-updated \
             --function-name splitleger-api \
-            --region ap-southeast-1
+            --region ap-south-1

@@ -18,15 +18,15 @@ set -euo pipefail
 # ── Config ────────────────────────────────────────────────────────────────────
 
 FUNCTION_NAME="splitleger-api"
-REGION="ap-southeast-1"
+REGION="ap-south-1"
 RUNTIME="provided.al2023"
 TIMEOUT=30      # seconds — raise if your p99 ever approaches this
 MEMORY=512      # MB
 
-# Lambda Web Adapter public layer (x86_64, ap-southeast-1).
+# Lambda Web Adapter public layer (x86_64, ap-south-1).
 # Check latest at: https://github.com/awslabs/aws-lambda-go-api-proxy
-# or: aws lambda list-layer-versions --layer-name LambdaAdapterLayerX86 --region ap-southeast-1
-ADAPTER_LAYER="arn:aws:lambda:ap-southeast-1:753240598075:layer:LambdaAdapterLayerX86:24"
+# or: aws lambda list-layer-versions --layer-name LambdaAdapterLayerX86 --region ap-south-1
+ADAPTER_LAYER="arn:aws:lambda:ap-south-1:753240598075:layer:LambdaAdapterLayerX86:24"
 
 GITHUB_ORG="${GITHUB_ORG:-Ke-vin-S}"
 GITHUB_REPO="${GITHUB_REPO:-ledger}"
@@ -106,7 +106,7 @@ rm -rf "$TMPDIR"
 #   aws lambda update-function-configuration \
 #     --function-name splitleger-api \
 #     --environment "Variables={...,DATABASE_URL=<value>,...}" \
-#     --region ap-southeast-1
+#     --region ap-south-1
 
 echo "Attaching Lambda Web Adapter layer and setting env vars..."
 aws lambda update-function-configuration \
@@ -116,15 +116,11 @@ aws lambda update-function-configuration \
   --environment "Variables={
     PORT=8080,
     ENV=production,
-    AWS_REGION=${REGION},
-    FRONTEND_URL=https://splitleger.app,
+    FRONTEND_URL=https://ledger.kevinsanjula.me,
     DATABASE_URL=REPLACE_ME,
     REDIS_URL=REPLACE_ME,
     JWT_PRIVATE_KEY=REPLACE_ME,
     JWT_PUBLIC_KEY=REPLACE_ME,
-    GOOGLE_CLIENT_ID=REPLACE_ME,
-    GOOGLE_CLIENT_SECRET=REPLACE_ME,
-    S3_BUCKET=splitleger-receipts
   }" \
   --region "$REGION" >/dev/null
 
