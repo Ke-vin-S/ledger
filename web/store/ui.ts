@@ -25,14 +25,23 @@ type UIStore = {
   closeAllModals: () => void;
 };
 
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "system";
+  const saved = localStorage.getItem("theme");
+  if (saved === "dark" || saved === "light" || saved === "system") return saved;
+  return "system";
+}
+
 export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
-  theme: "system",
+  theme: getInitialTheme(),
   setTheme: (theme) => {
     set({ theme });
+    if (typeof window === "undefined") return;
+    localStorage.setItem("theme", theme);
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
