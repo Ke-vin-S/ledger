@@ -22,12 +22,14 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/db"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	domainflag "github.com/Ke-vin-S/ledger/api/internal/domain/flag"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
+	notificationhandler "github.com/Ke-vin-S/ledger/api/internal/handler/notification"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
@@ -102,6 +104,7 @@ func run() error {
 	expenseRepo := repository.NewExpenseRepo(pool)
 	settlementRepo := repository.NewSettlementRepo(pool)
 	flagRepo := repository.NewFlagRepo(pool)
+	notificationRepo := repository.NewNotificationRepo(pool)
 
 	// S3 presigner
 	presigner, err := storage.NewS3Presigner(ctx, cfg.S3Bucket, cfg.AWSRegion)
@@ -115,6 +118,7 @@ func run() error {
 	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
 	flagSvc := domainflag.NewService(flagRepo, auditor)
+	notificationSvc := notification.NewService(notificationRepo)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
@@ -123,6 +127,7 @@ func run() error {
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
 	settlementH := settlementhandler.New(settlementSvc)
 	flagH := flaghandler.New(flagSvc)
+	notificationH := notificationhandler.New(notificationSvc)
 
 	// Router
 	r := chi.NewRouter()
@@ -163,6 +168,9 @@ func run() error {
 		r.Mount("/", flagH.ExpenseRoutes(authMW))
 	})
 	r.Mount("/v1/flags", flagH.FlagRoutes(authMW))
+
+	// Notification routes
+	r.Mount("/v1/notifications", notificationH.Routes(authMW))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
