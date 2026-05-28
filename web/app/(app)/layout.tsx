@@ -63,8 +63,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const unreadCount = notifications?.items.length ?? 0;
 
+  const PAGE_TITLES: Record<string, string> = {
+    "/dashboard": "Dashboard",
+    "/loans": "Loans & Balances",
+    "/notifications": "Notifications",
+    "/settings": "Settings",
+    "/teams": "Teams",
+  };
+  const pageTitle = PAGE_TITLES[pathname] ?? null;
+
+  const isDarkMode =
+    typeof window !== "undefined" && document.documentElement.classList.contains("dark");
+
   function toggleTheme() {
-    setTheme(theme === "dark" ? "light" : "dark");
+    setTheme(isDarkMode ? "light" : "dark");
   }
 
   return (
@@ -77,7 +89,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Header */}
-        <div className="flex items-center h-14 px-3 border-b gap-2.5 flex-shrink-0">
+        <div className="flex items-center h-14 px-3 border-b gap-2 flex-shrink-0">
           <button
             onClick={toggleSidebar}
             className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
@@ -86,17 +98,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {sidebarOpen ? <X className="h-[1.05rem] w-[1.05rem]" /> : <Menu className="h-[1.05rem] w-[1.05rem]" />}
           </button>
           {sidebarOpen && (
-            <span className="font-semibold text-[0.85rem] tracking-[0.06em] uppercase text-[hsl(var(--foreground))] truncate">
+            <Link
+              href="/dashboard"
+              className="flex-1 text-center [font-family:var(--font-serif)] font-bold text-xl tracking-tight text-[hsl(var(--foreground))] hover:opacity-70 transition-opacity"
+            >
               SplitLedger
-            </span>
+            </Link>
           )}
           {sidebarOpen && (
             <button
               onClick={toggleTheme}
-              className="ml-auto p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+              className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
               aria-label="Toggle theme"
             >
-              {theme === "dark" ? <Sun className="h-[1.05rem] w-[1.05rem]" /> : <Moon className="h-[1.05rem] w-[1.05rem]" />}
+              {isDarkMode ? <Sun className="h-[1.05rem] w-[1.05rem]" /> : <Moon className="h-[1.05rem] w-[1.05rem]" />}
             </button>
           )}
         </div>
@@ -226,8 +241,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-[hsl(var(--background))]">
-        {children}
+      <main className="flex-1 flex flex-col overflow-hidden bg-[hsl(var(--background))]">
+        <div className="h-14 border-b flex items-center px-8 flex-shrink-0">
+          {pageTitle && (
+            <h1 className="text-xl font-bold tracking-tight">{pageTitle}</h1>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </main>
     </div>
   );
