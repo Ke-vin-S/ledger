@@ -12,19 +12,14 @@ type envelope struct {
 	Meta meta `json:"meta"`
 }
 
-type paginatedEnvelope struct {
-	Data any       `json:"data"`
-	Meta paginatedMeta `json:"meta"`
-}
-
 type meta struct {
 	RequestID string `json:"request_id"`
 }
 
-type paginatedMeta struct {
+type paginatedData struct {
+	Items      any    `json:"items"`
 	NextCursor string `json:"next_cursor,omitempty"`
 	HasMore    bool   `json:"has_more"`
-	RequestID  string `json:"request_id"`
 }
 
 type errorEnvelope struct {
@@ -47,16 +42,16 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
 	})
 }
 
-func JSONPaginated(w http.ResponseWriter, r *http.Request, data any, nextCursor string, hasMore bool) {
+func JSONPaginated(w http.ResponseWriter, r *http.Request, items any, nextCursor string, hasMore bool) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(paginatedEnvelope{
-		Data: data,
-		Meta: paginatedMeta{
+	_ = json.NewEncoder(w).Encode(envelope{
+		Data: paginatedData{
+			Items:      items,
 			NextCursor: nextCursor,
 			HasMore:    hasMore,
-			RequestID:  middleware.GetRequestID(r.Context()),
 		},
+		Meta: meta{RequestID: middleware.GetRequestID(r.Context())},
 	})
 }
 

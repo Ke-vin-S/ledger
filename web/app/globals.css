@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Light mode — brand: #2563EB, bg: #F8FAFC, text: #1E293B */
+    --background: 210 40% 98%;
+    --foreground: 215 33% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 33% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 33% 17%;
+    --primary: 219 79% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 215 33% 17%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 55%;
+    --accent: 213 96% 93%;
+    --accent-foreground: 219 79% 43%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 219 79% 53%;
+    --radius: 0.5rem;
+    --positive: 160 84% 39%;
+    --negative: 0 72% 51%;
+    --pending: 38 92% 44%;
+    --settled: 220 9% 46%;
+  }
+
+  .dark {
+    /* Dark mode — bg: #0F172A, surface: #1E293B */
+    --background: 222 47% 11%;
+    --foreground: 210 40% 96%;
+    --card: 215 33% 17%;
+    --card-foreground: 210 40% 96%;
+    --popover: 215 33% 17%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 219 79% 63%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 31% 22%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 215 31% 22%;
+    --muted-foreground: 215 16% 58%;
+    --accent: 215 31% 22%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 24% 27%;
+    --input: 215 24% 27%;
+    --ring: 219 79% 63%;
+    --positive: 160 60% 50%;
+    --negative: 0 72% 60%;
+    --pending: 38 80% 55%;
+    --settled: 220 9% 56%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-serif, var(--font-sans, ui-serif, serif));
+    letter-spacing: -0.02em;
+  }
+}
