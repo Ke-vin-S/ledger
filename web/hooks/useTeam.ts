@@ -3,10 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-type Team = {
+export type Team = {
   id: string;
   name: string;
   description?: string;
+  currency: string;
+  is_public: boolean;
+  owner_id: string;
   created_at: string;
 };
 
@@ -45,7 +48,7 @@ export function useTeamMembers(teamId: string) {
 export function useCreateTeam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; description?: string }) =>
+    mutationFn: (data: { name: string; description?: string; currency: string; is_public?: boolean }) =>
       api.post<Team>("/teams", data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["teams"] }),
   });
