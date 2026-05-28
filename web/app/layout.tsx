@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { DM_Sans, DM_Serif_Display } from "next/font/google";
+import { Sora, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
-const dmSans = DM_Sans({
+const sora = Sora({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-sans",
+  weight: ["300", "400", "500", "600", "700"],
 });
 
 const dmSerifDisplay = DM_Serif_Display({
@@ -43,7 +44,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${dmSans.variable} ${dmSerifDisplay.variable} font-sans`}>
+      <body className={`${sora.variable} ${dmSerifDisplay.variable} font-sans`}>
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -181,7 +181,7 @@ export default function TeamPage() {
 
   if (teamLoading) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="p-8 space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-64" />
       </div>
@@ -198,9 +198,9 @@ export default function TeamPage() {
   ] as const;
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-8 space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold">{team.name}</h1>
+        <h1 className="text-3xl font-bold">{team.name}</h1>
         {team.description && (
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">{team.description}</p>
         )}

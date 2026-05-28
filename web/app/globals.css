@@ -2,76 +2,100 @@
 
 @layer base {
   :root {
-    /* Light mode — brand: #2563EB, bg: #F8FAFC, text: #1E293B */
-    --background: 210 40% 98%;
-    --foreground: 215 33% 17%;
+    /* Brand: #2563EB · Background: #F5F7FA · Text: #0F1C2E */
+    --background: 216 33% 97%;
+    --foreground: 215 50% 12%;          /* #0F1C2E — deep navy, high contrast */
     --card: 0 0% 100%;
-    --card-foreground: 215 33% 17%;
+    --card-foreground: 215 50% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 215 33% 17%;
-    --primary: 219 79% 53%;
+    --popover-foreground: 215 50% 12%;
+    --primary: 219 79% 53%;             /* #2563EB brand blue */
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 215 33% 17%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 55%;
-    --accent: 213 96% 93%;
+    --secondary: 214 32% 93%;
+    --secondary-foreground: 215 50% 12%;
+    --muted: 214 28% 93%;
+    --muted-foreground: 215 20% 40%;    /* ~#506178 — 5.5:1 contrast on bg */
+    --accent: 213 90% 95%;
     --accent-foreground: 219 79% 43%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 72% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
+    --border: 214 25% 87%;
+    --input: 214 25% 87%;
     --ring: 219 79% 53%;
     --radius: 0.5rem;
-    --positive: 160 84% 39%;
-    --negative: 0 72% 51%;
-    --pending: 38 92% 44%;
+    --positive: 160 84% 34%;            /* #059669 green */
+    --negative: 0 72% 48%;              /* #DC2626 red */
+    --pending: 38 92% 40%;
     --settled: 220 9% 46%;
   }
 
   .dark {
-    /* Dark mode — bg: #0F172A, surface: #1E293B */
-    --background: 222 47% 11%;
-    --foreground: 210 40% 96%;
-    --card: 215 33% 17%;
-    --card-foreground: 210 40% 96%;
-    --popover: 215 33% 17%;
-    --popover-foreground: 210 40% 96%;
-    --primary: 219 79% 63%;
+    --background: 222 47% 9%;           /* #0B1120 */
+    --foreground: 214 40% 94%;          /* #E6EDF5 */
+    --card: 218 40% 14%;                /* #182030 */
+    --card-foreground: 214 40% 94%;
+    --popover: 218 40% 14%;
+    --popover-foreground: 214 40% 94%;
+    --primary: 219 79% 65%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 215 31% 22%;
-    --secondary-foreground: 210 40% 96%;
-    --muted: 215 31% 22%;
-    --muted-foreground: 215 16% 58%;
-    --accent: 215 31% 22%;
-    --accent-foreground: 210 40% 96%;
-    --destructive: 0 62% 45%;
+    --secondary: 216 30% 20%;
+    --secondary-foreground: 214 40% 94%;
+    --muted: 216 30% 20%;
+    --muted-foreground: 215 20% 68%;    /* lightened for dark contrast */
+    --accent: 216 30% 20%;
+    --accent-foreground: 214 40% 94%;
+    --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 215 24% 27%;
-    --input: 215 24% 27%;
-    --ring: 219 79% 63%;
-    --positive: 160 60% 50%;
-    --negative: 0 72% 60%;
-    --pending: 38 80% 55%;
-    --settled: 220 9% 56%;
+    --border: 216 25% 24%;
+    --input: 216 25% 24%;
+    --ring: 219 79% 65%;
+    --positive: 160 60% 52%;
+    --negative: 0 72% 62%;
+    --pending: 38 80% 57%;
+    --settled: 220 9% 58%;
   }
 }
 
 @layer base {
+  html {
+    /* Bump the root from 16 → 17 px so all rem values scale up */
+    font-size: 106.25%;
+    scroll-behavior: smooth;
+  }
+
   * {
     border-color: hsl(var(--border));
+    box-sizing: border-box;
   }
 
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+    font-size: 1rem;              /* 17 px */
+    line-height: 1.65;
+    letter-spacing: 0.018em;     /* the "more distance" the user asked for */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  h1, h2, h3, h4 {
+  h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-serif, var(--font-sans, ui-serif, serif));
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;     /* still tight but not over-squeezed */
+    line-height: 1.25;
+    font-weight: 600;
+  }
+
+  /* Tabular nums everywhere an amount is shown */
+  [data-amount], .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Crisp focus rings */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: var(--radius);
   }
 }

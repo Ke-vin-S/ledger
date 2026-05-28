@@ -72,51 +72,53 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex flex-col bg-[hsl(var(--card))] border-r transition-all duration-200 flex-shrink-0 relative",
-          sidebarOpen ? "w-60" : "w-14",
+          "flex flex-col bg-[hsl(var(--card))] border-r transition-all duration-200 flex-shrink-0",
+          sidebarOpen ? "w-60" : "w-[3.5rem]",
         )}
       >
         {/* Header */}
-        <div className="flex items-center h-14 px-3 border-b gap-2 flex-shrink-0">
+        <div className="flex items-center h-14 px-3 border-b gap-2.5 flex-shrink-0">
           <button
             onClick={toggleSidebar}
-            className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0"
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
             aria-label="Toggle sidebar"
           >
-            {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            {sidebarOpen ? <X className="h-[1.05rem] w-[1.05rem]" /> : <Menu className="h-[1.05rem] w-[1.05rem]" />}
           </button>
           {sidebarOpen && (
-            <span className="font-semibold text-sm truncate tracking-tight">SplitLedger</span>
+            <span className="font-semibold text-[0.85rem] tracking-[0.06em] uppercase text-[hsl(var(--foreground))] truncate">
+              SplitLedger
+            </span>
           )}
           {sidebarOpen && (
             <button
               onClick={toggleTheme}
-              className="ml-auto p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
+              className="ml-auto p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
               aria-label="Toggle theme"
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? <Sun className="h-[1.05rem] w-[1.05rem]" /> : <Moon className="h-[1.05rem] w-[1.05rem]" />}
             </button>
           )}
         </div>
 
         {/* FAB — Add Expense */}
-        <div className="px-2 pt-3 pb-1 flex-shrink-0">
+        <div className="px-2.5 pt-3.5 pb-1.5 flex-shrink-0">
           <AddExpenseSheet>
             <button
               className={cn(
-                "flex items-center gap-2 w-full rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90",
-                !sidebarOpen && "justify-center px-2",
+                "flex items-center gap-2 w-full rounded-lg px-3 py-2.5 text-[0.8rem] font-semibold tracking-wide transition-all duration-150",
+                "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90 active:scale-[0.98] shadow-sm",
+                !sidebarOpen && "justify-center px-0",
               )}
             >
-              <Plus className="h-4 w-4 flex-shrink-0" />
+              <Plus className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
               {sidebarOpen && <span>Add Expense</span>}
             </button>
           </AddExpenseSheet>
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 py-2 space-y-0.5 px-2 overflow-y-auto">
+        <nav className="flex-1 py-1 space-y-px px-2 overflow-y-auto">
           {navItems.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(href + "/");
             return (
@@ -124,17 +126,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 key={href}
                 href={href as never}
                 className={cn(
-                  "flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors group relative",
+                  "flex items-center gap-3 py-2 text-[0.82rem] font-medium transition-all duration-100 group relative rounded-md",
+                  sidebarOpen ? "px-2.5" : "justify-center px-0",
                   isActive
-                    ? "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-medium"
-                    : "hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]",
-                  !sidebarOpen && "justify-center",
+                    ? "text-[hsl(var(--primary))] bg-[hsl(var(--accent))]"
+                    : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]",
                 )}
               >
+                {/* Active left border */}
+                {isActive && sidebarOpen && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-[hsl(var(--primary))]" />
+                )}
                 <div className="relative flex-shrink-0">
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-[1.05rem] w-[1.05rem]" />
                   {href === "/notifications" && unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] text-[8px] flex items-center justify-center font-bold">
+                    <span className="absolute -top-1 -right-1.5 h-3.5 w-3.5 rounded-full bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] text-[7px] flex items-center justify-center font-bold">
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                   )}
@@ -146,47 +152,42 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* Teams section */}
           {sidebarOpen && (
-            <div className="pt-3 pb-1">
-              <Link
-                href="/teams"
-                className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors group"
-              >
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-                  <span className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    Teams
-                  </span>
-                </div>
-                <ChevronRight className="h-3 w-3 text-[hsl(var(--muted-foreground))] opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Link>
-              <div className="space-y-0.5 mt-0.5">
+            <div className="pt-4 pb-1">
+              <p className="px-2.5 pb-1.5 text-[0.7rem] font-semibold tracking-[0.1em] uppercase text-[hsl(var(--muted-foreground))]">
+                Teams
+              </p>
+              <div className="space-y-px">
                 {teams?.slice(0, 6).map((team) => {
                   const isActive = pathname.startsWith(`/teams/${team.id}`);
                   return (
                     <Link
                       key={team.id}
-                      href={`/teams/${team.id}`}
+                      href={`/teams/${team.id}` as never}
                       className={cn(
-                        "flex items-center gap-2 pl-6 pr-2 py-1.5 rounded-lg text-sm transition-colors truncate",
+                        "flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.82rem] transition-all duration-100 truncate relative",
                         isActive
-                          ? "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-medium"
+                          ? "text-[hsl(var(--primary))] bg-[hsl(var(--accent))] font-medium"
                           : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]",
                       )}
                     >
-                      <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))] flex-shrink-0" />
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-[hsl(var(--primary))]" />
+                      )}
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full flex-shrink-0",
+                        isActive ? "bg-[hsl(var(--primary))]" : "bg-[hsl(var(--muted-foreground))] opacity-50",
+                      )} />
                       <span className="truncate">{team.name}</span>
                     </Link>
                   );
                 })}
-                {(teams?.length ?? 0) === 0 && (
-                  <Link
-                    href="/teams"
-                    className="flex items-center gap-2 pl-6 pr-2 py-1.5 rounded-lg text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
-                  >
-                    <Plus className="h-3 w-3" />
-                    New team
-                  </Link>
-                )}
+                <Link
+                  href="/teams"
+                  className="flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.78rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  {(teams?.length ?? 0) === 0 ? "Create a team" : "All teams"}
+                </Link>
               </div>
             </div>
           )}
@@ -194,30 +195,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {!sidebarOpen && (
             <Link
               href="/teams"
-              className="flex items-center justify-center px-2 py-2 rounded-lg text-sm hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+              className="flex items-center justify-center py-2 rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] transition-colors"
             >
-              <Users className="h-4 w-4" />
+              <Users className="h-[1.05rem] w-[1.05rem]" />
             </Link>
           )}
         </nav>
 
         {/* Footer */}
-        <div className="border-t p-2 flex-shrink-0">
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
+        <div className="border-t px-2.5 py-2.5 flex-shrink-0">
+          <div className="flex items-center gap-2.5">
             <Avatar name={me.display_name} size="sm" />
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate leading-tight">{me.display_name}</p>
-                <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">{me.email}</p>
+                <p className="text-[0.82rem] font-semibold truncate leading-tight">{me.display_name}</p>
+                <p className="text-[0.72rem] text-[hsl(var(--muted-foreground))] truncate mt-0.5">{me.email}</p>
               </div>
             )}
             {sidebarOpen && (
               <button
                 onClick={() => logout()}
-                className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0"
+                className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0"
                 aria-label="Log out"
               >
-                <LogOut className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                <LogOut className="h-[1.05rem] w-[1.05rem] text-[hsl(var(--muted-foreground))]" />
               </button>
             )}
           </div>

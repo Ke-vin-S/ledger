@@ -8,9 +8,9 @@ export default function LoansPage() {
   const { data: balances, isLoading } = useMyBalances();
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl">
+    <div className="p-8 space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-bold">Loans & Balances</h1>
+        <h1 className="text-3xl font-bold">Loans & Balances</h1>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
           Your net balances across all teams
         </p>
