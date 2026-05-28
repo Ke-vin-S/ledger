@@ -25,6 +25,7 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/auditlog"
 	domainflag "github.com/Ke-vin-S/ledger/api/internal/domain/flag"
+	domainloan "github.com/Ke-vin-S/ledger/api/internal/domain/loan"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
@@ -33,6 +34,7 @@ import (
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
 	auditloghandler "github.com/Ke-vin-S/ledger/api/internal/handler/auditlog"
+	loanhandler "github.com/Ke-vin-S/ledger/api/internal/handler/loan"
 	notificationhandler "github.com/Ke-vin-S/ledger/api/internal/handler/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/graph"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
@@ -111,6 +113,7 @@ func run() error {
 	flagRepo := repository.NewFlagRepo(pool)
 	notificationRepo := repository.NewNotificationRepo(pool)
 	auditLogRepo := repository.NewAuditLogRepo(pool)
+	loanRepo := repository.NewLoanRepo(pool)
 	activityStore := repository.NewActivityStore(pool)
 	dashStore := repository.NewDashboardStore(pool)
 	historyStore := repository.NewExpenseHistoryStore(pool)
@@ -127,6 +130,7 @@ func run() error {
 	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
 	flagSvc := domainflag.NewService(flagRepo, auditor)
+	loanSvc := domainloan.NewService(loanRepo, auditor)
 	notificationSvc := notification.NewService(notificationRepo)
 	auditLogSvc := auditlog.NewService(auditLogRepo)
 	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore)
@@ -138,6 +142,7 @@ func run() error {
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
 	settlementH := settlementhandler.New(settlementSvc)
 	flagH := flaghandler.New(flagSvc)
+	loanH := loanhandler.New(loanSvc)
 	notificationH := notificationhandler.New(notificationSvc)
 	auditLogH := auditloghandler.New(auditLogSvc)
 
@@ -180,6 +185,9 @@ func run() error {
 		r.Mount("/", flagH.ExpenseRoutes(authMW))
 	})
 	r.Mount("/v1/flags", flagH.FlagRoutes(authMW))
+
+	// Loan routes
+	r.Mount("/v1/loans", loanH.Routes(authMW))
 
 	// Notification routes
 	r.Mount("/v1/notifications", notificationH.Routes(authMW))
