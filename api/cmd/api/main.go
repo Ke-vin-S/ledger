@@ -147,8 +147,13 @@ func run() error {
 	auditLogH := auditloghandler.New(auditLogSvc)
 
 	// Router
+	corsOrigins := []string{cfg.FrontendURL}
+	if cfg.IsLocal() && cfg.FrontendURL != "http://localhost:3000" {
+		corsOrigins = append(corsOrigins, "http://localhost:3000")
+	}
+
 	r := chi.NewRouter()
-	r.Use(middleware.CORS)
+	r.Use(middleware.CORS(corsOrigins))
 	r.Use(middleware.RequestID)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
