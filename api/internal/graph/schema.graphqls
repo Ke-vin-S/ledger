@@ -1,0 +1,47 @@
+scalar Map
+
+type Query {
+  """Activity feed for a team — paginated, newest first."""
+  teamActivityFeed(teamId: ID!, limit: Int, cursor: String): ActivityFeedPage!
+
+  """Aggregated balance summary for the authenticated caller."""
+  dashboardAggregates: DashboardAggregates!
+
+  """Full correction history for an expense."""
+  expenseHistory(expenseId: ID!): [ExpenseVersion!]!
+}
+
+type ActivityFeedPage {
+  items:      [ActivityEntry!]!
+  nextCursor: String
+  hasMore:    Boolean!
+}
+
+type ActivityEntry {
+  id:         ID!
+  action:     String!
+  actorId:    ID
+  entityType: String!
+  entityId:   ID!
+  meta:       Map
+  createdAt:  String!
+}
+
+type DashboardAggregates {
+  """Total amount others owe the caller (minor units)."""
+  totalOwed:  Int!
+  """Total amount the caller owes others (minor units)."""
+  totalOwing: Int!
+  """totalOwed - totalOwing."""
+  netBalance: Int!
+}
+
+type ExpenseVersion {
+  id:               ID!
+  expenseId:        ID!
+  version:          Int!
+  snapshot:         Map!
+  correctedBy:      ID!
+  correctionReason: String
+  createdAt:        String!
+}

@@ -16,6 +16,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/playground"
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
 	"github.com/Ke-vin-S/ledger/api/internal/config"
@@ -30,6 +32,7 @@ import (
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
 	notificationhandler "github.com/Ke-vin-S/ledger/api/internal/handler/notification"
+	"github.com/Ke-vin-S/ledger/api/internal/graph"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
@@ -105,6 +108,9 @@ func run() error {
 	settlementRepo := repository.NewSettlementRepo(pool)
 	flagRepo := repository.NewFlagRepo(pool)
 	notificationRepo := repository.NewNotificationRepo(pool)
+	activityStore := repository.NewActivityStore(pool)
+	dashStore := repository.NewDashboardStore(pool)
+	historyStore := repository.NewExpenseHistoryStore(pool)
 
 	// S3 presigner
 	presigner, err := storage.NewS3Presigner(ctx, cfg.S3Bucket, cfg.AWSRegion)
@@ -119,6 +125,7 @@ func run() error {
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
 	flagSvc := domainflag.NewService(flagRepo, auditor)
 	notificationSvc := notification.NewService(notificationRepo)
+	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore)
 
 	// Handlers
 	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
@@ -171,6 +178,13 @@ func run() error {
 
 	// Notification routes
 	r.Mount("/v1/notifications", notificationH.Routes(authMW))
+
+	// GraphQL — read-only, auth-guarded
+	gqlSrv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: gqlResolver}))
+	r.With(authMW).Handle("/graphql", gqlSrv)
+	if cfg.IsLocal() {
+		r.Handle("/playground", playground.Handler("GraphQL", "/graphql"))
+	}
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
