@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Sora, DM_Serif_Display } from "next/font/google";
+import { Sora, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
@@ -10,11 +10,11 @@ const sora = Sora({
   weight: ["300", "400", "500", "600", "700"],
 });
 
-const dmSerifDisplay = DM_Serif_Display({
+const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
   display: "swap",
-  weight: "400",
   variable: "--font-serif",
+  weight: ["600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -44,7 +44,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${sora.variable} ${dmSerifDisplay.variable} font-sans`}>
+      <body className={`${sora.variable} ${plusJakartaSans.variable} font-sans`}>
         <Providers>{children}</Providers>
       </body>
     </html>
