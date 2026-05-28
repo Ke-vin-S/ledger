@@ -25,7 +25,7 @@ function computeEqualShare(total: number, n: number): number {
   return Math.floor(total / n);
 }
 
-export function SplitBuilder({ participants, total, currency, method, value, onChange }: Props) {
+export function SplitBuilder({ participants, total, currency, method, onChange }: Props) {
   const [inputs, setInputs] = useState<Record<string, number>>({});
 
   // Reset inputs whenever participants or method change

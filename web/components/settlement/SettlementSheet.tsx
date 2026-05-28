@@ -9,7 +9,6 @@ import { AmountInput } from "@/components/expense/AmountInput";
 import { Avatar } from "@/components/shared/Avatar";
 import { useRecordSettlement } from "@/hooks/useSettlements";
 import { ApiRequestError } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import { SETTLEMENT_METHODS, SELECT_CLASS } from "@/constants/config";
 import type { SettlementMethod } from "@/types/settlement.types";
 

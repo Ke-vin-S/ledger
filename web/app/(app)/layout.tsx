@@ -14,7 +14,6 @@ import {
   X,
   LogOut,
   Plus,
-  ChevronRight,
   Sun,
   Moon,
 } from "lucide-react";
@@ -41,7 +40,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: me, isLoading, isError } = useMe();
   const { data: teams } = useTeams();
-  const { sidebarOpen, toggleSidebar, theme, setTheme } = useUIStore();
+  const { sidebarOpen, toggleSidebar, setTheme } = useUIStore();
   const { mutate: logout } = useLogout();
   const { data: notifications } = useNotifications(true);
 

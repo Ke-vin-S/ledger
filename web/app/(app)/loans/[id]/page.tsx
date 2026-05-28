@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, ArrowUpRight, ArrowDownLeft, Copy, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { LOAN_STATUS_BADGE } from "@/constants/config";
 import { ROUTES } from "@/constants/routes";
 

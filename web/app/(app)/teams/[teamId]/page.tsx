@@ -34,7 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, UserPlus, UserX, Link2, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
-import { cn } from "@/lib/utils";
+
 import { CURRENCY_CODES, SPLIT_METHODS, SELECT_CLASS } from "@/constants/config";
 
 const expenseSchema = z.object({
@@ -219,7 +219,7 @@ function MembersTab({ teamId }: { teamId: string }) {
   const { mutateAsync: inviteMember } = useInviteMember(teamId);
   const { mutateAsync: addAnonymous } = useAddAnonymousMember(teamId);
   const { mutateAsync: generateClaimToken } = useGenerateClaimToken();
-  const { mutate: removeMember } = useRemoveMember(teamId);
+  useRemoveMember(teamId);
 
   const [showInvite, setShowInvite] = useState(false);
   const [showAddAnon, setShowAddAnon] = useState(false);
@@ -373,7 +373,7 @@ export default function TeamPage() {
   const { data: team, isLoading: teamLoading } = useTeam(teamId);
   const { data: expenses, isLoading: expensesLoading } = useExpenses(teamId);
   const { data: balances } = useTeamBalances(teamId);
-  const { mutate: voidExpense } = useVoidExpense(teamId);
+  useVoidExpense(teamId);
   const [showCreateExpense, setShowCreateExpense] = useState(false);
   const [activeTab, setActiveTab] = useState<"expenses" | "members" | "balances" | "activity">("expenses");
 

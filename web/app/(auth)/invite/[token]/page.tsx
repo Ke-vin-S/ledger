@@ -13,7 +13,7 @@ export default function InvitePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [teamId, setTeamId] = useState<string | null>(null);
+  const [, setTeamId] = useState<string | null>(null);
 
   async function handleAccept() {
     setLoading(true);

@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AmountInput } from "@/components/expense/AmountInput";
-import { Card, CardContent } from "@/components/ui/card";
+
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";

@@ -189,7 +189,6 @@ export default function ExpenseDetailPage() {
               {settlements.map((s) => {
                 const payer = memberMap.get(s.payer_id);
                 const payee = memberMap.get(s.payee_id);
-                const isMe = s.payer_id === me?.id || s.payee_id === me?.id;
                 const canAct = s.status === "pending_confirmation" && s.payee_id === me?.id;
                 return (
                   <div key={s.id} className={cn("p-3 rounded-lg border text-sm", SETTLEMENT_STATUS_COLORS[s.status] ?? "border-[hsl(var(--border))]")}>

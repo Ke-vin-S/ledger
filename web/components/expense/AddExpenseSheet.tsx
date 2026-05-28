@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { AmountInput } from "@/components/expense/AmountInput";
 import { MemberPicker } from "@/components/expense/MemberPicker";
 import { SplitBuilder } from "@/components/expense/SplitBuilder";
-import { Avatar } from "@/components/shared/Avatar";
 import { useTeams, useTeamMembers, isAnonymousMember } from "@/hooks/useTeam";
 import { useMe } from "@/hooks/useAuth";
 import { useCreateExpense } from "@/hooks/useExpenses";
