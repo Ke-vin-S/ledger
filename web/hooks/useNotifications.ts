@@ -25,7 +25,7 @@ export function useNotifications(unreadOnly = false) {
     queryKey: ["notifications", { unreadOnly }],
     queryFn: () =>
       api.get<NotificationPage>(
-        `/notifications${unreadOnly ? "?unread_only=true" : ""}`,
+        `/notifications${unreadOnly ? "?unread=true" : ""}`,
       ),
     refetchInterval: 30_000,
   });

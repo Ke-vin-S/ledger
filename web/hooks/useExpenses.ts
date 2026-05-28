@@ -38,7 +38,7 @@ export type CreateExpenseInput = {
   expense_date: string;
   paid_by?: string;
   note?: string;
-  splits?: { user_id: string; share_units?: number }[];
+  splits?: { user_id: string; share_amount?: number; share_units?: number }[];
 };
 
 export function useExpenses(teamId: string) {
@@ -69,6 +69,21 @@ export function useCreateExpense(teamId: string) {
       qc.invalidateQueries({ queryKey: ["teams", teamId, "expenses"] });
       qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
       qc.invalidateQueries({ queryKey: ["users", "me"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useCorrectExpense(teamId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ expenseId, data }: { expenseId: string; data: Partial<CreateExpenseInput> & { correction_reason?: string } }) =>
+      api.patch<Expense>(`/teams/${teamId}/expenses/${expenseId}`, data),
+    onSuccess: (_, { expenseId }) => {
+      qc.invalidateQueries({ queryKey: ["teams", teamId, "expenses"] });
+      qc.invalidateQueries({ queryKey: ["expenses", expenseId] });
+      qc.invalidateQueries({ queryKey: ["expenses", expenseId, "history"] });
+      qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
     },
   });
 }

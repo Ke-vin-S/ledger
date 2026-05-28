@@ -9,9 +9,17 @@ type Settlement = {
   payer_id: string;
   payee_id: string;
   amount: number;
+  method: string;
+  method_note?: string;
   status: string;
-  recorded_at: string;
+  recorded_by: string;
+  confirmed_by?: string;
   confirmed_at?: string;
+  disputed_by?: string;
+  disputed_at?: string;
+  dispute_reason?: string;
+  settled_on: string;
+  created_at: string;
 };
 
 type Balance = {
@@ -43,13 +51,20 @@ export function useMyBalances() {
   });
 }
 
-export function useRecordSettlement(expenseId: string) {
+export function useRecordSettlement(teamId: string, expenseId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { payee_id: string; amount: number }) =>
-      api.post<Settlement>(`/expenses/${expenseId}/settlements`, data),
+    mutationFn: (data: {
+      payer_id: string;
+      payee_id: string;
+      amount: number;
+      method: string;
+      method_note?: string;
+      settled_on: string;
+    }) => api.post<Settlement>(`/expenses/${expenseId}/settlements`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["expenses", expenseId, "settlements"] });
+      qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
       qc.invalidateQueries({ queryKey: ["balances"] });
     },
   });
@@ -62,6 +77,19 @@ export function useConfirmSettlement() {
       api.post(`/settlements/${settlementId}/confirm`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["balances"] });
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+    },
+  });
+}
+
+export function useDisputeSettlement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ settlementId, reason }: { settlementId: string; reason?: string }) =>
+      api.post(`/settlements/${settlementId}/dispute`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["balances"] });
+      qc.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
 }
