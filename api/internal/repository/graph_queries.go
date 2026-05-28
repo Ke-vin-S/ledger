@@ -65,15 +65,28 @@ func NewDashboardStore(pool *pgxpool.Pool) graph.DashboardStore {
 func (s *pgDashStore) QueryDashboardAggregates(
 	ctx context.Context, userID uuid.UUID,
 ) (*model.DashboardAggregates, error) {
-	// user_net_balances: user_id = debtor, counterparty_id = creditor, net_amount = how much user owes counterparty.
-	// Positive net_amount: user owes counterparty → totalOwing.
-	// Negative net_amount: counterparty owes user → totalOwed (abs value).
+	// Combine team expense splits and personal loans into a single owed/owing total.
+	// Expense splits: creditor_id = user → owed to user; debtor_id = user → user owes.
+	// Loans:          direction = lent   → owed to user; direction = borrowed → user owes.
 	row := s.pool.QueryRow(ctx, `
 		SELECT
-			COALESCE(SUM(CASE WHEN net_amount < 0 THEN -net_amount ELSE 0 END), 0) AS total_owed,
-			COALESCE(SUM(CASE WHEN net_amount > 0 THEN net_amount  ELSE 0 END), 0) AS total_owing
-		FROM user_net_balances
-		WHERE user_id = $1
+			COALESCE(exp.total_owed, 0) + COALESCE(loan.lent, 0),
+			COALESCE(exp.total_owing, 0) + COALESCE(loan.borrowed, 0)
+		FROM (
+			SELECT
+				SUM(CASE WHEN creditor_id = $1 THEN balance ELSE 0 END) AS total_owed,
+				SUM(CASE WHEN debtor_id   = $1 THEN balance ELSE 0 END) AS total_owing
+			FROM debt_balances
+			WHERE creditor_id = $1 OR debtor_id = $1
+		) exp,
+		(
+			SELECT
+				SUM(CASE WHEN direction = 'lent'     THEN amount ELSE 0 END) AS lent,
+				SUM(CASE WHEN direction = 'borrowed' THEN amount ELSE 0 END) AS borrowed
+			FROM loans
+			WHERE user_id = $1
+			  AND status IN ('outstanding', 'partially_repaid')
+		) loan
 	`, userID)
 
 	var agg model.DashboardAggregates

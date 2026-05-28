@@ -28,9 +28,9 @@ type ActivityEntry {
 }
 
 type DashboardAggregates {
-  """Total amount others owe the caller (minor units)."""
+  """Total amount others owe the caller (expenses + loans lent), in minor units."""
   totalOwed:  Int!
-  """Total amount the caller owes others (minor units)."""
+  """Total amount the caller owes others (expenses + loans borrowed), in minor units."""
   totalOwing: Int!
   """totalOwed - totalOwing."""
   netBalance: Int!

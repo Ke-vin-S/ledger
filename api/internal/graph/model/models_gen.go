@@ -19,9 +19,9 @@ type ActivityFeedPage struct {
 }
 
 type DashboardAggregates struct {
-	// Total amount others owe the caller (minor units).
+	// Total amount others owe the caller (expenses + loans lent), in minor units.
 	TotalOwed int `json:"totalOwed"`
-	// Total amount the caller owes others (minor units).
+	// Total amount the caller owes others (expenses + loans borrowed), in minor units.
 	TotalOwing int `json:"totalOwing"`
 	// totalOwed - totalOwing.
 	NetBalance int `json:"netBalance"`

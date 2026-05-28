@@ -10,10 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/graph/model"
+	"github.com/google/uuid"
 )
 
 // TeamActivityFeed is the resolver for the teamActivityFeed field.
