@@ -23,6 +23,7 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/auditlog"
 	domainflag "github.com/Ke-vin-S/ledger/api/internal/domain/flag"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
@@ -31,6 +32,7 @@ import (
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
+	auditloghandler "github.com/Ke-vin-S/ledger/api/internal/handler/auditlog"
 	notificationhandler "github.com/Ke-vin-S/ledger/api/internal/handler/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/graph"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
@@ -108,6 +110,7 @@ func run() error {
 	settlementRepo := repository.NewSettlementRepo(pool)
 	flagRepo := repository.NewFlagRepo(pool)
 	notificationRepo := repository.NewNotificationRepo(pool)
+	auditLogRepo := repository.NewAuditLogRepo(pool)
 	activityStore := repository.NewActivityStore(pool)
 	dashStore := repository.NewDashboardStore(pool)
 	historyStore := repository.NewExpenseHistoryStore(pool)
@@ -125,6 +128,7 @@ func run() error {
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
 	flagSvc := domainflag.NewService(flagRepo, auditor)
 	notificationSvc := notification.NewService(notificationRepo)
+	auditLogSvc := auditlog.NewService(auditLogRepo)
 	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore)
 
 	// Handlers
@@ -135,6 +139,7 @@ func run() error {
 	settlementH := settlementhandler.New(settlementSvc)
 	flagH := flaghandler.New(flagSvc)
 	notificationH := notificationhandler.New(notificationSvc)
+	auditLogH := auditloghandler.New(auditLogSvc)
 
 	// Router
 	r := chi.NewRouter()
@@ -178,6 +183,12 @@ func run() error {
 
 	// Notification routes
 	r.Mount("/v1/notifications", notificationH.Routes(authMW))
+
+	// Audit log read routes
+	r.Route("/v1/teams/{teamId}/audit", func(r chi.Router) {
+		r.Mount("/", auditLogH.TeamRoutes(authMW))
+	})
+	r.Mount("/v1/audit", auditLogH.MyRoutes(authMW))
 
 	// GraphQL — read-only, auth-guarded
 	gqlSrv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: gqlResolver}))
