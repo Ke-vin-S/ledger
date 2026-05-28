@@ -24,12 +24,7 @@ export default function NotificationsPage() {
   return (
     <div className="p-8 space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Notifications</h1>
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
-            {unread.length} unread
-          </p>
-        </div>
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">{unread.length} unread</p>
         {unread.length > 0 && (
           <Button
             variant="outline"

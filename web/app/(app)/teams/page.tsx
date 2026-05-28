@@ -121,12 +121,7 @@ export default function TeamsPage() {
   return (
     <div className="p-8 space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Teams</h1>
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
-            Manage your expense-sharing groups
-          </p>
-        </div>
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">Manage your expense-sharing groups</p>
         {!showCreate && (
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4 mr-1" /> New team

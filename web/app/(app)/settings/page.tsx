@@ -172,12 +172,6 @@ function CurrencySection() {
 export default function SettingsPage() {
   return (
     <div className="p-8 space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
-          Manage your account preferences
-        </p>
-      </div>
       <ProfileSection />
       <CurrencySection />
     </div>

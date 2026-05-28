@@ -114,13 +114,6 @@ function TeamsList() {
 export default function DashboardPage() {
   return (
     <div className="p-8 space-y-8 max-w-4xl">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
-          Your financial overview
-        </p>
-      </div>
-
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Balance summary</h2>
         <BalanceSummary />
