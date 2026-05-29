@@ -90,7 +90,7 @@ export default function ExpenseDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-8 space-y-4 max-w-2xl">
+      <div className="p-4 md:p-8 space-y-4 max-w-2xl">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-48" />
         <Skeleton className="h-32" />
@@ -103,7 +103,7 @@ export default function ExpenseDetailPage() {
   const payer = memberMap.get(expense.paid_by);
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       {/* Back */}
       <button
         onClick={() => router.push(ROUTES.team(teamId) as never)}

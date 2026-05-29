@@ -119,7 +119,7 @@ export default function TeamsPage() {
   const defaultCurrency = me?.currency_pref ?? "LKR";
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Manage your expense-sharing groups</p>
         {!showCreate && (

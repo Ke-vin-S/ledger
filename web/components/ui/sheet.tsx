@@ -13,18 +13,24 @@ type SheetContentProps = {
   className?: string;
   title: string;
   description?: string;
+  side?: "left" | "right";
 };
 
-export function SheetContent({ children, className, title, description }: SheetContentProps) {
+export function SheetContent({ children, className, title, description, side = "right" }: SheetContentProps) {
+  const positionClasses =
+    side === "left"
+      ? "left-0 top-0 data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left"
+      : "right-0 top-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right";
+
   return (
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
       <Dialog.Content
         className={cn(
-          "fixed right-0 top-0 z-50 h-full w-full max-w-md bg-[hsl(var(--card))] shadow-xl flex flex-col",
+          "fixed z-50 h-full w-full max-w-md bg-[hsl(var(--card))] shadow-xl flex flex-col",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
           "duration-200",
+          positionClasses,
           className,
         )}
       >

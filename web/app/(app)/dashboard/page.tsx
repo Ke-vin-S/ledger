@@ -14,7 +14,7 @@ function BalanceSummary() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className="h-24" />
         ))}
@@ -113,7 +113,7 @@ function TeamsList() {
 
 export default function DashboardPage() {
   return (
-    <div className="p-8 space-y-8 max-w-4xl">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-4xl">
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Balance summary</h2>
         <BalanceSummary />

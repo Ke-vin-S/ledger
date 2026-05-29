@@ -3,6 +3,7 @@
 @layer base {
   :root {
     /* Brand: #2563EB · Background: #F5F7FA · Text: #0F1C2E */
+    --bottom-nav-h: 4rem;
     --background: 216 33% 97%;
     --foreground: 215 50% 12%;          /* #0F1C2E — deep navy, high contrast */
     --card: 0 0% 100%;
@@ -97,5 +98,11 @@
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
     border-radius: var(--radius);
+  }
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }

@@ -156,7 +156,7 @@ function CurrencySection() {
 
 export default function SettingsPage() {
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       <ProfileSection />
       <CurrencySection />
     </div>

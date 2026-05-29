@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import React from "react";
@@ -23,6 +23,8 @@ import { useUIStore } from "@/store/ui";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Avatar } from "@/components/shared/Avatar";
 import { AddExpenseSheet } from "@/components/expense/AddExpenseSheet";
+import { BottomNav } from "@/components/shared/BottomNav";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { PAGE_TITLES } from "@/constants/config";
 import { ROUTES } from "@/constants/routes";
@@ -40,6 +42,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: me, isLoading, isError } = useMe();
   const { data: teams } = useTeams();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const { sidebarOpen, toggleSidebar, setTheme } = useUIStore();
   const { mutate: logout } = useLogout();
   const { data: notifications } = useNotifications(true);
@@ -76,10 +79,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar — desktop only */}
       <aside
         className={cn(
-          "flex flex-col bg-[hsl(var(--card))] border-r transition-all duration-200 flex-shrink-0",
+          "hidden md:flex flex-col bg-[hsl(var(--card))] border-r transition-all duration-200 flex-shrink-0",
           sidebarOpen ? "w-60" : "w-[3.5rem]",
         )}
       >
@@ -237,15 +240,156 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden bg-[hsl(var(--background))]">
-        <div className="h-14 border-b flex items-center px-8 flex-shrink-0">
+        {/* Mobile header */}
+        <div className="md:hidden h-14 border-b flex items-center px-4 gap-3 flex-shrink-0 bg-[hsl(var(--card))]">
+          <button
+            onClick={() => setMobileDrawerOpen(true)}
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            aria-label="Open navigation"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <Link
+            href={ROUTES.dashboard}
+            className="flex-1 [font-family:var(--font-serif)] font-bold text-lg tracking-tight text-[hsl(var(--foreground))] hover:opacity-70 transition-opacity"
+          >
+            SplitLedger
+          </Link>
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            aria-label="Toggle theme"
+          >
+            {isDarkMode ? <Sun className="h-[1.05rem] w-[1.05rem]" /> : <Moon className="h-[1.05rem] w-[1.05rem]" />}
+          </button>
+        </div>
+
+        {/* Desktop header */}
+        <div className="hidden md:flex h-14 border-b items-center px-8 flex-shrink-0">
           {pageTitle && (
             <h1 className="text-xl font-bold tracking-tight">{pageTitle}</h1>
           )}
         </div>
-        <div className="flex-1 overflow-y-auto">
+
+        <div className="flex-1 overflow-y-auto pb-[var(--bottom-nav-h)] md:pb-0">
           {children}
         </div>
       </main>
+
+      {/* Mobile nav drawer */}
+      <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+        <SheetContent side="left" title="Navigation" className="w-72 max-w-[85vw] flex flex-col">
+          {/* FAB */}
+          <div className="px-1 pt-1 pb-3">
+            <AddExpenseSheet>
+              <button
+                className="flex items-center gap-2 w-full rounded-lg px-3 py-2.5 text-[0.8rem] font-semibold tracking-wide bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90 active:scale-[0.98] shadow-sm"
+                onClick={() => setMobileDrawerOpen(false)}
+              >
+                <Plus className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
+                <span>Add Expense</span>
+              </button>
+            </AddExpenseSheet>
+          </div>
+
+          {/* Nav items */}
+          <nav className="space-y-px">
+            {navItems.map(({ href, label, icon: Icon }) => {
+              const isActive = pathname === href || pathname.startsWith(href + "/");
+              return (
+                <Link
+                  key={href}
+                  href={href as never}
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 py-2 px-2.5 text-[0.82rem] font-medium rounded-md transition-colors relative",
+                    isActive
+                      ? "text-[hsl(var(--primary))] bg-[hsl(var(--accent))]"
+                      : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]",
+                  )}
+                >
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-[hsl(var(--primary))]" />
+                  )}
+                  <div className="relative flex-shrink-0">
+                    <Icon className="h-[1.05rem] w-[1.05rem]" />
+                    {href === ROUTES.notifications && unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1.5 h-3.5 w-3.5 rounded-full bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] text-[7px] flex items-center justify-center font-bold">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Teams sub-list */}
+          {(teams?.length ?? 0) > 0 && (
+            <div className="pt-4 pb-1 border-t mt-4">
+              <p className="px-2.5 pb-1.5 text-[0.7rem] font-semibold tracking-[0.1em] uppercase text-[hsl(var(--muted-foreground))]">
+                Teams
+              </p>
+              <div className="space-y-px">
+                {teams?.slice(0, 6).map((team) => {
+                  const isActive = pathname.startsWith(`/teams/${team.id}`);
+                  return (
+                    <Link
+                      key={team.id}
+                      href={ROUTES.team(team.id) as never}
+                      onClick={() => setMobileDrawerOpen(false)}
+                      className={cn(
+                        "flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.82rem] transition-colors truncate relative",
+                        isActive
+                          ? "text-[hsl(var(--primary))] bg-[hsl(var(--accent))] font-medium"
+                          : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]",
+                      )}
+                    >
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-[hsl(var(--primary))]" />
+                      )}
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full flex-shrink-0",
+                        isActive ? "bg-[hsl(var(--primary))]" : "bg-[hsl(var(--muted-foreground))] opacity-50",
+                      )} />
+                      <span className="truncate">{team.name}</span>
+                    </Link>
+                  );
+                })}
+                <Link
+                  href={ROUTES.teams}
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className="flex items-center gap-2.5 pl-2.5 pr-2 py-1.5 rounded-md text-[0.78rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  All teams
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="sticky bottom-0 -mx-6 -mb-5 px-6 py-3 border-t bg-[hsl(var(--card))] mt-6">
+            <div className="flex items-center gap-2.5">
+              <Avatar name={me.display_name} src={me.avatar_url ?? undefined} size="sm" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[0.82rem] font-semibold truncate leading-tight">{me.display_name}</p>
+                <p className="text-[0.72rem] text-[hsl(var(--muted-foreground))] truncate mt-0.5">{me.email}</p>
+              </div>
+              <button
+                onClick={() => logout()}
+                className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0"
+                aria-label="Log out"
+              >
+                <LogOut className="h-[1.05rem] w-[1.05rem] text-[hsl(var(--muted-foreground))]" />
+              </button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <BottomNav />
     </div>
   );
 }

@@ -174,7 +174,7 @@ export default function LoansPage() {
   const loading = tab === "lent" ? lentLoading : (tab === "borrowed" ? borrowedLoading : balancesLoading);
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger asChild>
@@ -190,12 +190,12 @@ export default function LoansPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto scrollbar-none">
         {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
               tab === key
                 ? "border-[hsl(var(--primary))] text-[hsl(var(--foreground))]"
                 : "border-transparent text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"

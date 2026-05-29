@@ -22,7 +22,7 @@ export default function NotificationsPage() {
   const unread = items.filter((n) => !n.is_read);
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--muted-foreground))]">{unread.length} unread</p>
         {unread.length > 0 && (

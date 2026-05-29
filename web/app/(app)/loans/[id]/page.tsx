@@ -59,7 +59,7 @@ export default function LoanDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-8 space-y-4 max-w-lg">
+      <div className="p-4 md:p-8 space-y-4 max-w-lg">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-40" />
         <Skeleton className="h-32" />
@@ -74,7 +74,7 @@ export default function LoanDetailPage() {
   const outstanding = loan.amount - repaid;
 
   return (
-    <div className="p-8 space-y-6 max-w-lg">
+    <div className="p-4 md:p-8 space-y-6 max-w-lg">
       {/* Back */}
       <button
         onClick={() => router.push(ROUTES.loans)}
