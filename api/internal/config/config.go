@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 		JWTPrivateKey:      os.Getenv("JWT_PRIVATE_KEY"),
 		JWTPublicKey:       os.Getenv("JWT_PUBLIC_KEY"),
 		S3Bucket:           os.Getenv("S3_BUCKET"),
-		AWSRegion:          getenv("AWS_REGION", "ap-southeast-1"),
+		AWSRegion:          getenv("AWS_REGION", "ap-south-1"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		FrontendURL:        getenv("FRONTEND_URL", "http://localhost:3000"),

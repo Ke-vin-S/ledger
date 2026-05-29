@@ -23,7 +23,7 @@ Personal and team expense tracking. Split bills, manage loans, settle debts, and
 |---|---|
 | API | Go 1.25, Chi, pgx v5, gqlgen, Redis |
 | Frontend | Next.js 15 (App Router), Tailwind v4, shadcn/ui, React Query v5, Zustand |
-| Infrastructure | AWS CDK (TypeScript), ECS Fargate, ALB, ElastiCache, S3, SSM |
+| Infrastructure | AWS CDK (TypeScript), ECS Fargate, ALB, ElastiCache, S3, SSM (ap-south-1) |
 | Database | PostgreSQL (Aiven) |
 | Auth | RS256 JWT + refresh token rotation, Google OAuth |
 | Logging | go.uber.org/zap — JSON stdout, forwardable to CloudWatch / Datadog / Loki |
@@ -103,7 +103,7 @@ pnpm dev                    # dev server on :3000
 | `ENV` | no | `local` \| `production`. Default `local` |
 | `LOG_LEVEL` | no | `debug` \| `info` \| `warn` \| `error`. Default `info` |
 | `S3_BUCKET` | no | Receipts bucket name |
-| `AWS_REGION` | no | Default `ap-southeast-1` |
+| `AWS_REGION` | no | Default `ap-south-1` |
 | `GOOGLE_CLIENT_ID` | no | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | no | Google OAuth client secret |
 | `FRONTEND_URL` | no | Allowed CORS origin. Default `http://localhost:3000` |
@@ -190,7 +190,7 @@ cdk synth                               # dry run, generate CloudFormation
 
 ## Infrastructure (AWS)
 
-Four CDK stacks deployed to `ap-southeast-1`:
+Four CDK stacks deployed to `ap-south-1`:
 
 ```
 SplitlegerNetwork → SplitlegerData → SplitlegerApp → SplitlegerPipeline
@@ -204,7 +204,7 @@ SplitlegerNetwork → SplitlegerData → SplitlegerApp → SplitlegerPipeline
 First-time deploy:
 
 ```bash
-cdk bootstrap aws://ACCOUNT_ID/ap-southeast-1
+cdk bootstrap aws://ACCOUNT_ID/ap-south-1
 cdk deploy --all --require-approval broadening
 # then populate SSM secrets — see infra/CLAUDE.md
 ```

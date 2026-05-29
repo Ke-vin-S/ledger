@@ -5,7 +5,7 @@
 export const CONFIG = {
   // ── Project ───────────────────────────────────────────────────────────────
   projectName: 'splitleger',
-  region:      'ap-southeast-1',   // Singapore
+  region:      'ap-south-1',   // Mumbai
 
   // ── Domain ────────────────────────────────────────────────────────────────
   // Replace with your actual domain.
