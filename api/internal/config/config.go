@@ -7,8 +7,9 @@ import (
 )
 
 type Config struct {
-	Port string
-	Env  string
+	Port     string
+	Env      string
+	LogLevel string
 
 	DatabaseURL string
 	RedisURL    string
@@ -29,6 +30,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		Port:               getenv("PORT", "8080"),
 		Env:                getenv("ENV", "local"),
+		LogLevel:           getenv("LOG_LEVEL", "info"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		RedisURL:           os.Getenv("REDIS_URL"),
 		JWTPrivateKey:      os.Getenv("JWT_PRIVATE_KEY"),

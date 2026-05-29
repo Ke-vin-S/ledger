@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"go.uber.org/zap"
+
+	"github.com/Ke-vin-S/ledger/api/internal/logger"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 )
 
@@ -66,4 +69,11 @@ func ErrorField(w http.ResponseWriter, r *http.Request, status int, code, messag
 		Error: apiError{Code: code, Message: message, Field: field},
 		Meta:  meta{RequestID: middleware.GetRequestID(r.Context())},
 	})
+	if status >= 500 {
+		logger.FromContext(r.Context()).Error("unhandled error",
+			zap.Int("status", status),
+			zap.String("code", code),
+			zap.String("message", message),
+		)
+	}
 }

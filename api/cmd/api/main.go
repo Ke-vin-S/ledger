@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
@@ -40,6 +40,7 @@ import (
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
+	"github.com/Ke-vin-S/ledger/api/internal/logger"
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 	"github.com/Ke-vin-S/ledger/api/internal/repository"
 	"github.com/Ke-vin-S/ledger/api/internal/storage"
@@ -62,7 +63,9 @@ func (a *teamGatewayAdapter) GetMembership(ctx context.Context, teamID, userID u
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalf("startup: %v", err)
+		// logger may not be initialised yet; fall back to stderr
+		fmt.Fprintf(os.Stderr, "startup: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -74,6 +77,9 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	log := logger.Init(cfg.Env, cfg.LogLevel)
+	defer log.Sync() //nolint:errcheck
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -82,7 +88,7 @@ func run() error {
 		return fmt.Errorf("connect db: %w", err)
 	}
 	defer pool.Close()
-	log.Println("connected to database")
+	log.Info("connected to database")
 
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
@@ -93,7 +99,7 @@ func run() error {
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		return fmt.Errorf("ping redis: %w", err)
 	}
-	log.Println("connected to redis")
+	log.Info("connected to redis")
 
 	// Core infrastructure
 	auditor := audit.NewLogger(pool)
@@ -155,7 +161,7 @@ func run() error {
 	r := chi.NewRouter()
 	r.Use(middleware.CORS(corsOrigins))
 	r.Use(middleware.RequestID)
-	r.Use(chimiddleware.Logger)
+	r.Use(middleware.RequestLogger(log))
 	r.Use(chimiddleware.Recoverer)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -222,14 +228,14 @@ func run() error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("server listening on :%s (env=%s)", cfg.Port, cfg.Env)
+		log.Info("server listening", zap.String("port", cfg.Port), zap.String("env", cfg.Env))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
+			log.Fatal("listen error", zap.Error(err))
 		}
 	}()
 
 	<-quit
-	log.Println("shutting down...")
+	log.Info("shutting down")
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutCancel()
@@ -237,6 +243,6 @@ func run() error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
-	log.Println("server stopped")
+	log.Info("server stopped")
 	return nil
 }
