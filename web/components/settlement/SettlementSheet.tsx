@@ -9,7 +9,8 @@ import { AmountInput } from "@/components/expense/AmountInput";
 import { Avatar } from "@/components/shared/Avatar";
 import { useRecordSettlement } from "@/hooks/useSettlements";
 import { ApiRequestError } from "@/lib/api";
-import { SETTLEMENT_METHODS, SELECT_CLASS } from "@/constants/config";
+import { SETTLEMENT_METHODS } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SettlementMethod } from "@/types/settlement.types";
 
 type Method = SettlementMethod;
@@ -84,15 +85,16 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
           {/* Method */}
           <div className="space-y-1.5">
             <Label>Payment method</Label>
-            <select
-              className={SELECT_CLASS}
-              value={method}
-              onChange={(e) => setMethod(e.target.value as Method)}
-            >
-              {SETTLEMENT_METHODS.map(({ value, label }) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
+            <Select value={method} onValueChange={(v) => setMethod(v as Method)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SETTLEMENT_METHODS.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Method note (UPI/bank) */}

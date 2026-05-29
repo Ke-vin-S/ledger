@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Avatar } from "@/components/shared/Avatar";
 import { AmountInput } from "@/components/expense/AmountInput";
+import { Input } from "@/components/ui/input";
 import { formatAmount } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertCircle } from "lucide-react";
@@ -139,13 +140,13 @@ export function SplitBuilder({ participants, total, currency, method, onChange }
               <Avatar name={p.name} size="sm" className="h-5 w-5 text-[0.55rem] flex-shrink-0" />
               <span className="flex-1 truncate text-xs">{p.name}</span>
               <div className="flex items-center gap-1.5 w-36">
-                <input
+                <Input
                   type="number"
                   min={0}
                   max={100}
                   value={pct}
                   onChange={(e) => setPct(p.id, Number(e.target.value))}
-                  className="w-14 h-8 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+                  className="w-14 h-8 px-2 text-xs text-right"
                 />
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">%</span>
                 <span className="text-xs font-mono text-[hsl(var(--muted-foreground))] w-16 text-right truncate">
@@ -183,12 +184,12 @@ export function SplitBuilder({ participants, total, currency, method, onChange }
               <Avatar name={p.name} size="sm" className="h-5 w-5 text-[0.55rem] flex-shrink-0" />
               <span className="flex-1 truncate text-xs">{p.name}</span>
               <div className="flex items-center gap-1.5 w-36">
-                <input
+                <Input
                   type="number"
                   min={1}
                   value={units}
                   onChange={(e) => setShares(p.id, Math.max(1, Number(e.target.value)))}
-                  className="w-14 h-8 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+                  className="w-14 h-8 px-2 text-xs text-right"
                 />
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">×</span>
                 <span className="text-xs font-mono text-[hsl(var(--muted-foreground))] w-16 text-right truncate">

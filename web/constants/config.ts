@@ -31,9 +31,6 @@ export const SETTLEMENT_METHODS = [
 
 export const NOTIFICATION_POLL_INTERVAL = 30_000;
 
-export const SELECT_CLASS =
-  "w-full h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]";
-
 export const LOAN_STATUS_BADGE: Record<
   string,
   { label: string; variant: "default" | "secondary" | "outline" | "destructive" }

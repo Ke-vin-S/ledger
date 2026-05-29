@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -35,7 +35,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, UserPlus, UserX, Link2, Check } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 
-import { CURRENCY_CODES, SPLIT_METHODS, SELECT_CLASS } from "@/constants/config";
+import { CURRENCY_CODES, SPLIT_METHODS } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const expenseSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -60,7 +61,7 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
   const [participantObjects, setParticipantObjects] = useState<PickedMember[]>([]);
   const [splits, setSplits] = useState<SplitEntry[]>([]);
 
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<ExpenseFormValues>({
+  const { register, handleSubmit, setValue, control, formState: { errors } } = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
       currency: "LKR",
@@ -115,14 +116,20 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Currency</Label>
-              <select
-                className={SELECT_CLASS}
-                {...register("currency")}
-                onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
-                defaultValue="LKR"
-              >
-                {CURRENCY_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <Controller
+                name="currency"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCY_CODES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Date</Label>
@@ -141,14 +148,24 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
           {teamMembers && teamMembers.length > 0 && (
             <div className="space-y-1.5">
               <Label>Paid by</Label>
-              <select className={SELECT_CLASS} {...register("paid_by")} defaultValue={me?.id ?? ""}>
-                <option value="">Select who paid…</option>
-                {teamMembers.map((m) => (
-                  <option key={m.user_id} value={m.user_id}>
-                    {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
-                  </option>
-                ))}
-              </select>
+              <Controller
+                name="paid_by"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select who paid…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teamMembers.map((m) => (
+                        <SelectItem key={m.user_id} value={m.user_id}>
+                          {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
               {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
             </div>
           )}
@@ -156,15 +173,22 @@ function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () =>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Split method</Label>
-              <select
-                className={SELECT_CLASS}
-                {...register("split_method")}
-                onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
-              >
-                {SPLIT_METHODS.map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
+              <Controller
+                name="split_method"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); setSplitMethod(v as SplitMethod); }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SPLIT_METHODS.map(({ value, label }) => (
+                        <SelectItem key={value} value={value}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(opt.)</span></Label>

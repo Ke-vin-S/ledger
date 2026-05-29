@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowRight, Plus } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
-import { CURRENCIES, SELECT_CLASS } from "@/constants/config";
+import { CURRENCIES } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ROUTES } from "@/constants/routes";
 
 const schema = z.object({
@@ -28,7 +29,7 @@ function CreateTeamForm({ defaultCurrency, onClose }: { defaultCurrency: string;
   const { mutateAsync, isPending } = useCreateTeam();
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { currency: defaultCurrency },
   });
@@ -71,16 +72,23 @@ function CreateTeamForm({ defaultCurrency, onClose }: { defaultCurrency: string;
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="currency">Currency</Label>
-            <select
-              id="currency"
-              className={SELECT_CLASS}
-              {...register("currency")}
-            >
-              {CURRENCIES.map(({ code, label }) => (
-                <option key={code} value={code}>{label}</option>
-              ))}
-            </select>
+            <Label>Currency</Label>
+            <Controller
+              name="currency"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.map(({ code, label }) => (
+                      <SelectItem key={code} value={code}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
             {errors.currency && (
               <p className="text-xs text-[hsl(var(--destructive))]">{errors.currency.message}</p>
             )}

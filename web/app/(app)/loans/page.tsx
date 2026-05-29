@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
@@ -22,7 +22,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { CURRENCY_CODES, LOAN_STATUS_BADGE_SHORT, SELECT_CLASS } from "@/constants/config";
+import { CURRENCY_CODES, LOAN_STATUS_BADGE_SHORT } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ROUTES } from "@/constants/routes";
 
 const loanSchema = z.object({
@@ -41,7 +42,7 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
   const [currency, setCurrency] = useState("LKR");
   const [serverError, setServerError] = useState("");
 
-  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<LoanFormValues>({
+  const { register, handleSubmit, setValue, watch, control, formState: { errors } } = useForm<LoanFormValues>({
     resolver: zodResolver(loanSchema),
     defaultValues: {
       direction: "lent",
@@ -109,14 +110,20 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Currency</Label>
-          <select
-            className={SELECT_CLASS}
-            {...register("currency")}
-            onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
-            defaultValue="LKR"
-          >
-            {CURRENCY_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <Controller
+            name="currency"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCY_CODES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
         <div className="space-y-1.5">
           <Label>Date</Label>

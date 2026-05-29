@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useMe, useUpdateProfile, useUpdateCurrencyPref } from "@/hooks/useAuth";
 import { ApiRequestError } from "@/lib/api";
-import { CURRENCIES, SELECT_CLASS } from "@/constants/config";
+import { CURRENCIES } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -124,17 +125,17 @@ function CurrencySection() {
         )}
         <div className="flex items-center gap-3">
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor="currency_pref">Currency</Label>
-            <select
-              id="currency_pref"
-              className={SELECT_CLASS}
-              defaultValue={currentCurrency}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              {CURRENCIES.map(({ code, label }) => (
-                <option key={code} value={code}>{label}</option>
-              ))}
-            </select>
+            <Label>Currency</Label>
+            <Select defaultValue={currentCurrency} onValueChange={setSelected}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CURRENCIES.map(({ code, label }) => (
+                  <SelectItem key={code} value={code}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Button
             size="sm"

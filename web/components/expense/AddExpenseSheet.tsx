@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Sheet, SheetTrigger, SheetContent, SheetClose } from "@/components/ui/sheet";
@@ -15,7 +15,8 @@ import { useTeams, useTeamMembers, isAnonymousMember } from "@/hooks/useTeam";
 import { useMe } from "@/hooks/useAuth";
 import { useCreateExpense } from "@/hooks/useExpenses";
 import { ApiRequestError } from "@/lib/api";
-import { CURRENCIES, SPLIT_METHODS, SELECT_CLASS } from "@/constants/config";
+import { CURRENCIES, SPLIT_METHODS } from "@/constants/config";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SplitMethod, SplitEntry } from "@/types/expense.types";
 import type { PickedMember } from "@/types/team.types";
 
@@ -51,6 +52,7 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
     handleSubmit,
     setValue,
     reset,
+    control,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -113,16 +115,22 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       {/* Team */}
       <div className="space-y-1.5">
         <Label>Team</Label>
-        <select
-          className={SELECT_CLASS}
-          {...register("team_id")}
-          onChange={(e) => handleTeamChange(e.target.value)}
-        >
-          <option value="">Select a team…</option>
-          {teams?.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
+        <Controller
+          name="team_id"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={(v) => { field.onChange(v); handleTeamChange(v); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a team…" />
+              </SelectTrigger>
+              <SelectContent>
+                {teams?.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
         {errors.team_id && <p className="text-xs text-[hsl(var(--destructive))]">{errors.team_id.message}</p>}
       </div>
 
@@ -137,16 +145,22 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Currency</Label>
-          <select
-            className={SELECT_CLASS}
-            {...register("currency")}
-            onChange={(e) => { setValue("currency", e.target.value); setCurrency(e.target.value); }}
-            defaultValue="LKR"
-          >
-            {CURRENCIES.map(({ code, label }) => (
-              <option key={code} value={code}>{label}</option>
-            ))}
-          </select>
+          <Controller
+            name="currency"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map(({ code, label }) => (
+                    <SelectItem key={code} value={code}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
         <div className="space-y-1.5">
           <Label>Date</Label>
@@ -170,18 +184,24 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       {selectedTeamId && teamMembers && teamMembers.length > 0 && (
         <div className="space-y-1.5">
           <Label>Paid by</Label>
-          <select
-            className={SELECT_CLASS}
-            {...register("paid_by")}
-            defaultValue={me?.id ?? ""}
-          >
-            <option value="">Select who paid…</option>
-            {teamMembers.map((m) => (
-              <option key={m.user_id} value={m.user_id}>
-                {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
-              </option>
-            ))}
-          </select>
+          <Controller
+            name="paid_by"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select who paid…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teamMembers.map((m) => (
+                    <SelectItem key={m.user_id} value={m.user_id}>
+                      {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
           {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
         </div>
       )}
@@ -189,15 +209,22 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       {/* Split method */}
       <div className="space-y-1.5">
         <Label>Split method</Label>
-        <select
-          className={SELECT_CLASS}
-          {...register("split_method")}
-          onChange={(e) => { setValue("split_method", e.target.value as SplitMethod); setSplitMethod(e.target.value as SplitMethod); }}
-        >
-          {SPLIT_METHODS.map(({ value, label }) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
+        <Controller
+          name="split_method"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={(v) => { field.onChange(v); setSplitMethod(v as SplitMethod); }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SPLIT_METHODS.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
       </div>
 
       {/* Participants */}

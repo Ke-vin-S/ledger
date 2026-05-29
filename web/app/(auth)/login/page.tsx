@@ -10,6 +10,8 @@ import { api, ApiRequestError } from "@/lib/api";
 import { setAccessToken } from "@/lib/auth";
 import { ROUTES } from "@/constants/routes";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const schema = z.object({
   email: z.string().email("Invalid email"),
@@ -70,11 +72,10 @@ export default function LoginPage() {
           <label className="text-sm font-medium" htmlFor="email">
             Email
           </label>
-          <input
+          <Input
             id="email"
             type="email"
             autoComplete="email"
-            className="w-full px-3 py-2 rounded-md border bg-[hsl(var(--background))] text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             {...register("email")}
           />
           {errors.email && (
@@ -86,11 +87,10 @@ export default function LoginPage() {
           <label className="text-sm font-medium" htmlFor="password">
             Password
           </label>
-          <input
+          <Input
             id="password"
             type="password"
             autoComplete="current-password"
-            className="w-full px-3 py-2 rounded-md border bg-[hsl(var(--background))] text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             {...register("password")}
           />
           {errors.password && (
@@ -98,13 +98,9 @@ export default function LoginPage() {
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full py-2 px-4 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
+        <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
       </form>
 
       <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
