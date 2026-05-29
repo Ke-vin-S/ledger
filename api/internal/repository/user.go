@@ -100,6 +100,11 @@ func (r *userRepo) Update(ctx context.Context, u *user.User) (*user.User, error)
 	return scanUser(row)
 }
 
+func (r *userRepo) UpdateAvatarURL(ctx context.Context, userID uuid.UUID, avatarURL string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET avatar_url = $1 WHERE id = $2 AND deleted_at IS NULL`, avatarURL, userID)
+	return err
+}
+
 func (r *userRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
 	_, err := r.pool.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, userID)
 	return err

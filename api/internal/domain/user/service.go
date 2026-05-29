@@ -93,6 +93,9 @@ func (s *Service) FindOrCreateByOAuth(
 	// Try to find by OAuth link first.
 	u, err := s.repo.FindByOAuth(ctx, provider, providerUID)
 	if err == nil {
+		if avatarURL != "" {
+			_ = s.repo.UpdateAvatarURL(ctx, u.ID, avatarURL)
+		}
 		return u, false, nil
 	}
 	if err != ErrNotFound {
@@ -106,6 +109,9 @@ func (s *Service) FindOrCreateByOAuth(
 			emailPtr := &email
 			if err := s.repo.UpsertOAuthAccount(ctx, existing.ID, provider, providerUID, emailPtr); err != nil {
 				return nil, false, fmt.Errorf("link oauth: %w", err)
+			}
+			if avatarURL != "" {
+				_ = s.repo.UpdateAvatarURL(ctx, existing.ID, avatarURL)
 			}
 			return existing, false, nil
 		}

@@ -32,6 +32,9 @@ type Repository interface {
 	// Update stores changes to display_name, avatar_url, currency_pref, timezone.
 	Update(ctx context.Context, u *User) (*User, error)
 
+	// UpdateAvatarURL sets the avatar_url for a user. Used to refresh the photo on each OAuth login.
+	UpdateAvatarURL(ctx context.Context, userID uuid.UUID, avatarURL string) error
+
 	// UpdatePassword sets a new bcrypt password hash for the user.
 	UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 

@@ -51,7 +51,7 @@ function ProfileSection() {
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-4 mb-5">
-          <Avatar name={me?.display_name ?? "?"} size="lg" />
+          <Avatar name={me?.display_name ?? "?"} src={me?.avatar_url ?? undefined} size="lg" />
           <div>
             <p className="font-medium">{me?.display_name}</p>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">{me?.email}</p>

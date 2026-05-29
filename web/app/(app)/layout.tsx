@@ -215,7 +215,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Footer */}
         <div className="border-t px-2.5 py-2.5 flex-shrink-0">
           <div className="flex items-center gap-2.5">
-            <Avatar name={me.display_name} size="sm" />
+            <Avatar name={me.display_name} src={me.avatar_url ?? undefined} size="sm" />
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
                 <p className="text-[0.82rem] font-semibold truncate leading-tight">{me.display_name}</p>
