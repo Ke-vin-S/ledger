@@ -65,6 +65,7 @@ var (
 	ErrNotFound             = errors.New("user not found")
 	ErrEmailAlreadyExists   = errors.New("email already registered")
 	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrOAuthOnly            = errors.New("account uses OAuth login, no password set")
 	ErrAnonAlreadyClaimed   = errors.New("anonymous user already claimed")
 	ErrClaimTokenExpired    = errors.New("claim token is expired or already used")
 	ErrInvalidResetToken    = errors.New("password reset token is invalid or expired")

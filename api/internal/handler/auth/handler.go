@@ -101,6 +101,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.users.Login(r.Context(), body.Email, body.Password)
 	if err != nil {
+		if err == user.ErrOAuthOnly {
+			handler.Error(w, r, http.StatusUnauthorized, "OAUTH_ACCOUNT", "this account was created with Google — please sign in with Google")
+			return
+		}
 		handler.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "email or password is incorrect")
 		return
 	}
