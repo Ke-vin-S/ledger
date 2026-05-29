@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/api";
 import { setAccessToken } from "@/lib/auth";
 import { ROUTES } from "@/constants/routes";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 const schema = z.object({
   email: z.string().email("Invalid email"),
@@ -48,6 +49,14 @@ export default function LoginPage() {
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
           Track and split expenses with your team
         </p>
+      </div>
+
+      <GoogleSignInButton onError={setServerError} />
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-[hsl(var(--border))]" />
+        <span className="text-xs text-[hsl(var(--muted-foreground))]">or</span>
+        <div className="flex-1 h-px bg-[hsl(var(--border))]" />
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

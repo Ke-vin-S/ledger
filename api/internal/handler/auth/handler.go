@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -18,12 +20,13 @@ import (
 const refreshCookie = "refresh_token"
 
 type Handler struct {
-	users          *user.Service
-	jwt            *jwtauth.JWTService
-	tokens         *jwtauth.TokenStore
-	resetStore     *jwtauth.ResetStore
-	isLocal        bool
-	googleClientID string
+	users              *user.Service
+	jwt                *jwtauth.JWTService
+	tokens             *jwtauth.TokenStore
+	resetStore         *jwtauth.ResetStore
+	isLocal            bool
+	googleClientID     string
+	googleClientSecret string
 }
 
 func New(
@@ -33,14 +36,16 @@ func New(
 	resetStore *jwtauth.ResetStore,
 	isLocal bool,
 	googleClientID string,
+	googleClientSecret string,
 ) *Handler {
 	return &Handler{
-		users:          users,
-		jwt:            jwt,
-		tokens:         tokens,
-		resetStore:     resetStore,
-		isLocal:        isLocal,
-		googleClientID: googleClientID,
+		users:              users,
+		jwt:                jwt,
+		tokens:             tokens,
+		resetStore:         resetStore,
+		isLocal:            isLocal,
+		googleClientID:     googleClientID,
+		googleClientSecret: googleClientSecret,
 	}
 }
 
@@ -108,22 +113,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	handler.JSON(w, r, http.StatusOK, resp)
 }
 
-// POST /auth/oauth/google — expects { "credential": "<Google ID token>" }
+// POST /auth/oauth/google — expects { "code": "<Google authorization code>" }
 func (h *Handler) OAuthGoogle(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Credential string `json:"credential"`
+		Code string `json:"code"`
 	}
 	if !handler.Decode(w, r, &body) {
 		return
 	}
-	if body.Credential == "" {
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", "credential is required")
+	if body.Code == "" {
+		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", "code is required")
 		return
 	}
 
-	info, err := verifyGoogleIDToken(r.Context(), body.Credential, h.googleClientID)
+	info, err := exchangeGoogleCode(r.Context(), body.Code, h.googleClientID, h.googleClientSecret)
 	if err != nil {
-		handler.Error(w, r, http.StatusUnauthorized, "INVALID_TOKEN", "Google ID token verification failed")
+		handler.Error(w, r, http.StatusUnauthorized, "INVALID_TOKEN", "Google authorization failed")
 		return
 	}
 
@@ -314,37 +319,81 @@ func (h *Handler) handleUserError(w http.ResponseWriter, r *http.Request, err er
 	}
 }
 
-type googleTokenInfo struct {
+// Overridable in tests.
+var (
+	googleTokenEndpoint    = "https://oauth2.googleapis.com/token"
+	googleUserInfoEndpoint = "https://www.googleapis.com/oauth2/v3/userinfo"
+)
+
+type googleUserInfo struct {
 	Sub     string `json:"sub"`
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
-	Aud     string `json:"aud"`
 }
 
-func verifyGoogleIDToken(ctx context.Context, idToken, expectedClientID string) (*googleTokenInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://oauth2.googleapis.com/tokeninfo?id_token="+idToken, nil)
+// exchangeGoogleCode exchanges an authorization code for user info using the
+// client secret server-to-server. The frontend uses @react-oauth/google with
+// flow:"auth-code" (popup), which passes redirect_uri="postmessage" implicitly.
+func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret string) (*googleUserInfo, error) {
+	form := url.Values{
+		"code":          {code},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {"postmessage"},
+		"grant_type":    {"authorization_code"},
+	}
+
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, googleTokenEndpoint,
+		strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	tokenResp, err := http.DefaultClient.Do(tokenReq)
 	if err != nil {
-		return nil, fmt.Errorf("tokeninfo request: %w", err)
+		return nil, fmt.Errorf("token exchange: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tokeninfo returned status %d", resp.StatusCode)
+	defer tokenResp.Body.Close()
+
+	if tokenResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tokenResp.Body)
+		return nil, fmt.Errorf("token exchange status %d: %s", tokenResp.StatusCode, body)
 	}
-	var info googleTokenInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("decode tokeninfo: %w", err)
+
+	var tokens struct {
+		AccessToken string `json:"access_token"`
 	}
-	if expectedClientID != "" && info.Aud != expectedClientID {
-		return nil, fmt.Errorf("token audience %q does not match client ID", info.Aud)
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokens); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+	if tokens.AccessToken == "" {
+		return nil, fmt.Errorf("no access_token in token response")
+	}
+
+	infoReq, err := http.NewRequestWithContext(ctx, http.MethodGet, googleUserInfoEndpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	infoReq.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+
+	infoResp, err := http.DefaultClient.Do(infoReq)
+	if err != nil {
+		return nil, fmt.Errorf("userinfo request: %w", err)
+	}
+	defer infoResp.Body.Close()
+
+	if infoResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("userinfo returned status %d", infoResp.StatusCode)
+	}
+
+	var info googleUserInfo
+	if err := json.NewDecoder(infoResp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("decode userinfo: %w", err)
 	}
 	if info.Sub == "" {
-		return nil, fmt.Errorf("missing sub in tokeninfo")
+		return nil, fmt.Errorf("missing sub in userinfo")
 	}
 	return &info, nil
 }

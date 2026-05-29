@@ -142,7 +142,7 @@ func run() error {
 	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore)
 
 	// Handlers
-	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID)
+	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID, cfg.GoogleClientSecret)
 	userH := userhandler.New(userSvc, cfg.FrontendURL)
 	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
