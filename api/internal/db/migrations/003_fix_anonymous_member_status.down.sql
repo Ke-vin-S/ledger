@@ -1,0 +1,2 @@
+-- Data-only migration: cannot safely determine which rows were changed.
+-- Down is intentionally a no-op.
