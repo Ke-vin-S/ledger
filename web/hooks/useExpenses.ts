@@ -7,6 +7,13 @@ import { API_ENDPOINTS } from "@/constants/api";
 
 export type { Expense, CreateExpenseInput };
 
+export function useMyExpenses() {
+  return useQuery<Expense[]>({
+    queryKey: ["expenses", "mine"],
+    queryFn: () => api.get<Expense[]>(API_ENDPOINTS.expenses.list),
+  });
+}
+
 export function useExpenses(teamId: string) {
   return useQuery<Expense[]>({
     queryKey: ["teams", teamId, "expenses"],

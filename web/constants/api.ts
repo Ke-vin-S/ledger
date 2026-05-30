@@ -23,6 +23,7 @@ export const API_ENDPOINTS = {
     balances: (teamId: string) => `/teams/${teamId}/balances`,
   },
   expenses: {
+    list: "/expenses",
     detail: (expenseId: string) => `/expenses/${expenseId}`,
     settlements: (expenseId: string) => `/expenses/${expenseId}/settlements`,
   },
