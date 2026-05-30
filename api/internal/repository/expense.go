@@ -126,8 +126,7 @@ func (r *expenseRepo) ListForUser(ctx context.Context, userID uuid.UUID, include
 		       e.created_by, e.created_at
 		FROM expenses e
 		LEFT JOIN expense_splits es ON es.expense_id = e.id AND es.version = e.version
-		WHERE e.scope IN ('personal','direct')
-		  AND (e.paid_by = $1 OR es.user_id = $1)
+		WHERE (e.paid_by = $1 OR es.user_id = $1)
 	`
 	if !includeVoid {
 		q += " AND e.is_void = false"
