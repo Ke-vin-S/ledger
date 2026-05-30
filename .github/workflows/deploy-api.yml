@@ -11,9 +11,9 @@ on:
     paths:
       - "api/**"
 
-# Required GitHub secret:
-#   AWS_DEPLOY_ROLE_ARN — ARN of the IAM role to assume via OIDC.
-#   Run api/scripts/setup-lambda.sh once to create the function and this role.
+# Required GitHub secrets:
+#   AWS_DEPLOY_ROLE_ARN — ARN of the IAM role to assume via OIDC (from setup-lambda.sh)
+#   DATABASE_URL        — Aiven PostgreSQL connection string (sslmode=require)
 
 jobs:
   test:
@@ -33,9 +33,30 @@ jobs:
       - name: Run unit tests
         run: go test ./... -race -count=1 -short
 
+  migrate:
+    name: Migrate
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: go run ./cmd/migrate up
+
   deploy:
     name: Deploy to Lambda
-    needs: test
+    needs: migrate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
