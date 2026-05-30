@@ -209,10 +209,15 @@ func (r *userRepo) Claim(ctx context.Context, tokenHash string, claimedByID uuid
 	}
 
 	// 4. Reassign team memberships; skip teams where claiming user is already a member.
+	//    Claiming counts as acceptance: convert any 'invited' status to 'active'.
 	//    INSERT ... ON CONFLICT DO NOTHING preserves the claiming user's existing membership.
 	_, err = tx.Exec(ctx, `
 		INSERT INTO team_members (id, team_id, user_id, role, status, invited_by, request_message, resolved_by, resolved_at, joined_at, created_at)
-		SELECT gen_random_uuid(), team_id, $1, role, status, invited_by, request_message, resolved_by, resolved_at, joined_at, created_at
+		SELECT gen_random_uuid(), team_id, $1, role,
+		       CASE WHEN status = 'invited' THEN 'active'::membership_status ELSE status END,
+		       invited_by, request_message, resolved_by, resolved_at,
+		       CASE WHEN status = 'invited' THEN NOW() ELSE joined_at END,
+		       created_at
 		FROM team_members
 		WHERE user_id = $2
 		ON CONFLICT (team_id, user_id) DO NOTHING

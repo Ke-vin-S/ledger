@@ -151,12 +151,57 @@ func (s *Service) InviteMember(ctx context.Context, teamID, inviterID uuid.UUID,
 	return s.upsertInvitation(ctx, teamID, invitee.ID, inviterID)
 }
 
-// AddAnonymousMember adds an existing anonymous user to the team. Requires member+.
+// AddAnonymousMember adds an existing anonymous user to the team as an active member. Requires member+.
+// Anonymous users cannot interactively accept invitations, so they are added as active immediately.
 func (s *Service) AddAnonymousMember(ctx context.Context, teamID, requesterID, anonUserID uuid.UUID) (*TeamMember, error) {
 	if _, err := s.requireMembership(ctx, teamID, requesterID, RoleMember); err != nil {
 		return nil, err
 	}
-	return s.upsertInvitation(ctx, teamID, anonUserID, requesterID)
+	now := time.Now()
+	existing, err := s.repo.GetMembership(ctx, teamID, anonUserID)
+	if err == nil {
+		switch existing.Status {
+		case StatusActive, StatusInvited, StatusRequested:
+			return nil, ErrAlreadyMember
+		}
+		existing.Status = StatusActive
+		existing.InvitedBy = &requesterID
+		existing.ResolvedBy = nil
+		existing.ResolvedAt = nil
+		existing.JoinedAt = &now
+		m, err := s.repo.UpdateMember(ctx, existing)
+		if err != nil {
+			return nil, err
+		}
+		_ = s.auditor.Log(ctx, audit.Entry{
+			Action:     audit.ActionMemberInvited,
+			ActorID:    &requesterID,
+			TeamID:     &teamID,
+			EntityType: "team_member",
+			EntityID:   m.ID,
+		})
+		return m, nil
+	}
+	m := &TeamMember{
+		TeamID:    teamID,
+		UserID:    anonUserID,
+		Role:      RoleMember,
+		Status:    StatusActive,
+		InvitedBy: &requesterID,
+		JoinedAt:  &now,
+	}
+	created, err := s.repo.InsertMember(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberInvited,
+		ActorID:    &requesterID,
+		TeamID:     &teamID,
+		EntityType: "team_member",
+		EntityID:   created.ID,
+	})
+	return created, nil
 }
 
 // upsertInvitation handles both new invitations and re-invitations after removal.
