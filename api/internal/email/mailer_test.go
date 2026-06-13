@@ -2,8 +2,12 @@ package email_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/Ke-vin-S/ledger/api/internal/email"
 )
@@ -22,7 +26,7 @@ func (s *fakeSender) Send(_ context.Context, msg email.Message) error {
 }
 
 func newMailer(s email.Sender) *email.Mailer {
-	return email.NewMailer(s, "SplitLedger <no-reply@example.com>", "https://app.example.com/")
+	return email.NewMailer(s, "SplitLedger <no-reply@example.com>", "https://app.example.com/", zap.NewNop())
 }
 
 func TestInvitationEmail_SetsFromToSubjectAndAcceptURL(t *testing.T) {
@@ -70,6 +74,29 @@ func TestInviteLink_BuildsInvitePathURL(t *testing.T) {
 	const want = "https://app.example.com/invite/abc123"
 	if !strings.Contains(s.msg.TextBody, want) {
 		t.Errorf("text body missing invite URL %q\nbody: %s", want, s.msg.TextBody)
+	}
+}
+
+func TestSend_Failure_IsLoggedAtWarn(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	m := email.NewMailer(
+		&fakeSender{err: errors.New("ses: MessageRejected")},
+		"SplitLedger <no-reply@example.com>",
+		"https://app.example.com",
+		zap.New(core),
+	)
+
+	err := m.InvitationEmail(context.Background(), "bob@x.com", "Trip", "Alice", "tok")
+	if err == nil {
+		t.Fatal("expected the sender error to propagate")
+	}
+	entries := logs.FilterMessage("email send failed").All()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 warn log, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["to"] != "bob@x.com" {
+		t.Errorf("log missing/incorrect recipient: %v", fields["to"])
 	}
 }
 
