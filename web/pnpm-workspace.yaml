@@ -1,3 +1,6 @@
+# pnpm settings (this package is not a workspace). sharp/unrs-resolver install
+# build scripts are intentionally skipped — not needed at build/test time, and
+# Vercel runs its own production build. Explicit values stop pnpm prompting.
 allowBuilds:
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  sharp: false
+  unrs-resolver: false
