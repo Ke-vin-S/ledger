@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiRequestError } from "@/lib/api";
 import { setAccessToken } from "@/lib/auth";
 import { ROUTES } from "@/constants/routes";
+import { readNextParam } from "@/lib/next-path";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,13 @@ type FormValues = z.infer<typeof schema>;
 export default function LoginPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [nextPath, setNextPath] = useState<string | null>(null);
+
+  useEffect(() => setNextPath(readNextParam()), []);
+
+  const registerHref = nextPath
+    ? `${ROUTES.register}?next=${encodeURIComponent(nextPath)}`
+    : ROUTES.register;
 
   const {
     register,
@@ -34,7 +42,7 @@ export default function LoginPage() {
     try {
       const res = await api.post<{ access_token: string }>("/auth/login", data);
       setAccessToken(res.access_token);
-      router.push(ROUTES.dashboard);
+      router.push((nextPath ?? ROUTES.dashboard) as never);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setServerError(err.error.message);
@@ -105,7 +113,7 @@ export default function LoginPage() {
 
       <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
         Don&apos;t have an account?{" "}
-        <Link href={ROUTES.register} className="underline hover:text-[hsl(var(--foreground))]">
+        <Link href={registerHref as never} className="underline hover:text-[hsl(var(--foreground))]">
           Register
         </Link>
       </p>

@@ -11,5 +11,6 @@ export const ROUTES = {
   notifications: "/notifications",
   settings: "/settings",
   invite: (token: string) => `/invite/${token}`,
+  invitation: (token: string) => `/invitations/${token}`,
   claim: (token: string) => `/claim/${token}`,
 } as const;

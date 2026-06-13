@@ -16,7 +16,9 @@ export const API_ENDPOINTS = {
     detail: (teamId: string) => `/teams/${teamId}`,
     members: (teamId: string) => `/teams/${teamId}/members`,
     addAnonymous: (teamId: string) => `/teams/${teamId}/members/anonymous`,
-    invite: (teamId: string) => `/teams/${teamId}/members/invite`,
+    invitations: (teamId: string) => `/teams/${teamId}/invitations`,
+    cancelInvitation: (teamId: string, invId: string) => `/teams/${teamId}/invitations/${invId}`,
+    resendInvitation: (teamId: string, invId: string) => `/teams/${teamId}/invitations/${invId}/resend`,
     removeMember: (teamId: string, userId: string) => `/teams/${teamId}/members/${userId}`,
     expenses: (teamId: string) => `/teams/${teamId}/expenses`,
     expense: (teamId: string, expenseId: string) => `/teams/${teamId}/expenses/${expenseId}`,
@@ -47,5 +49,6 @@ export const API_ENDPOINTS = {
     dismiss: (id: string) => `/notifications/${id}`,
   },
   invite: (token: string) => `/invite/${token}`,
+  acceptInvitation: (token: string) => `/invitations/${token}/accept`,
   balances: "/balances",
 } as const;

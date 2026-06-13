@@ -23,3 +23,14 @@ export type PickedMember = {
   name: string;
   isAnonymous?: boolean;
 };
+
+export type Invitation = {
+  id: string;
+  team_id: string;
+  email: string;
+  role: string;
+  status: string;
+  inviter_name?: string;
+  expires_at: string;
+  created_at: string;
+};
