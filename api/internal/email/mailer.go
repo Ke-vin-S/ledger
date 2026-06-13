@@ -30,20 +30,20 @@ func NewMailer(sender Sender, from, frontendURL string) *Mailer {
 	}
 }
 
-// TeamInvite notifies an existing user that they've been invited to a team.
-func (m *Mailer) TeamInvite(ctx context.Context, to, inviteeName, teamName, inviterName string) error {
-	appURL := m.frontendURL + "/teams"
+// InvitationEmail invites someone (registered or not) to a team via a token link
+// that takes them to the accept page. Built from the raw invitation token.
+func (m *Mailer) InvitationEmail(ctx context.Context, to, teamName, inviterName, rawToken string) error {
+	acceptURL := m.frontendURL + "/invitations/" + url.PathEscape(rawToken)
 	return m.send(ctx, to,
 		fmt.Sprintf("%s invited you to %q on SplitLedger", inviterName, teamName),
 		emailContent{
 			Heading: "You've been invited",
 			Lines: []string{
-				fmt.Sprintf("Hi %s,", inviteeName),
 				fmt.Sprintf("%s invited you to join the team %q on SplitLedger.", inviterName, teamName),
-				"Open SplitLedger to accept the invitation.",
+				"Click below to accept. You'll be asked to sign in or create an account first. This invitation expires in 7 days.",
 			},
-			ButtonLabel: "View invitation",
-			ButtonURL:   appURL,
+			ButtonLabel: "Accept invitation",
+			ButtonURL:   acceptURL,
 		})
 }
 

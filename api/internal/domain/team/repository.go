@@ -33,4 +33,15 @@ type Repository interface {
 	FindInviteLinkByHash(ctx context.Context, tokenHash string) (*InviteLink, error)
 	RevokeInviteLink(ctx context.Context, linkID uuid.UUID) error
 	IncrementInviteLinkUse(ctx context.Context, linkID uuid.UUID, expiresAt *time.Time) error
+
+	// Email invitations
+	CreateInvitation(ctx context.Context, inv *Invitation) (*Invitation, error)
+	GetInvitationByID(ctx context.Context, id uuid.UUID) (*Invitation, error)
+	FindInvitationByHash(ctx context.Context, tokenHash string) (*Invitation, error)
+	FindPendingInvitation(ctx context.Context, teamID uuid.UUID, email string) (*Invitation, error)
+	ListPendingInvitations(ctx context.Context, teamID uuid.UUID) ([]*Invitation, error)
+	UpdateInvitation(ctx context.Context, inv *Invitation) (*Invitation, error)
+	// AcceptInvitation atomically upserts an active team membership for userID and
+	// marks the invitation accepted, in a single transaction.
+	AcceptInvitation(ctx context.Context, inv *Invitation, userID uuid.UUID) (*TeamMember, error)
 }

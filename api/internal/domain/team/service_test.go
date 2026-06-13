@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,20 +26,22 @@ func hashFor(raw string) string {
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
 type fakeTeamRepo struct {
-	teams      map[uuid.UUID]*team.Team
-	members    map[uuid.UUID]*team.TeamMember // keyed by member ID
-	links      map[uuid.UUID]*team.InviteLink
-	linkByHash map[string]*team.InviteLink
+	teams       map[uuid.UUID]*team.Team
+	members     map[uuid.UUID]*team.TeamMember // keyed by member ID
+	links       map[uuid.UUID]*team.InviteLink
+	linkByHash  map[string]*team.InviteLink
+	invitations map[uuid.UUID]*team.Invitation
 
 	createErr error
 }
 
 func newFakeRepo() *fakeTeamRepo {
 	return &fakeTeamRepo{
-		teams:      make(map[uuid.UUID]*team.Team),
-		members:    make(map[uuid.UUID]*team.TeamMember),
-		links:      make(map[uuid.UUID]*team.InviteLink),
-		linkByHash: make(map[string]*team.InviteLink),
+		teams:       make(map[uuid.UUID]*team.Team),
+		members:     make(map[uuid.UUID]*team.TeamMember),
+		links:       make(map[uuid.UUID]*team.InviteLink),
+		linkByHash:  make(map[string]*team.InviteLink),
+		invitations: make(map[uuid.UUID]*team.Invitation),
 	}
 }
 
@@ -183,6 +186,78 @@ func (r *fakeTeamRepo) IncrementInviteLinkUse(_ context.Context, linkID uuid.UUI
 	return nil
 }
 
+func (r *fakeTeamRepo) CreateInvitation(_ context.Context, inv *team.Invitation) (*team.Invitation, error) {
+	inv.ID = uuid.New()
+	inv.CreatedAt = time.Now()
+	r.invitations[inv.ID] = inv
+	return inv, nil
+}
+
+func (r *fakeTeamRepo) GetInvitationByID(_ context.Context, id uuid.UUID) (*team.Invitation, error) {
+	if inv, ok := r.invitations[id]; ok {
+		return inv, nil
+	}
+	return nil, team.ErrInvitationNotFound
+}
+
+func (r *fakeTeamRepo) FindInvitationByHash(_ context.Context, hash string) (*team.Invitation, error) {
+	for _, inv := range r.invitations {
+		if inv.TokenHash == hash {
+			return inv, nil
+		}
+	}
+	return nil, team.ErrInvitationInvalid
+}
+
+func (r *fakeTeamRepo) FindPendingInvitation(_ context.Context, teamID uuid.UUID, email string) (*team.Invitation, error) {
+	for _, inv := range r.invitations {
+		if inv.TeamID == teamID && strings.EqualFold(inv.Email, email) && inv.Status == team.InvitationPending {
+			return inv, nil
+		}
+	}
+	return nil, team.ErrInvitationNotFound
+}
+
+func (r *fakeTeamRepo) ListPendingInvitations(_ context.Context, teamID uuid.UUID) ([]*team.Invitation, error) {
+	var out []*team.Invitation
+	for _, inv := range r.invitations {
+		if inv.TeamID == teamID && inv.Status == team.InvitationPending {
+			out = append(out, inv)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeTeamRepo) UpdateInvitation(_ context.Context, inv *team.Invitation) (*team.Invitation, error) {
+	r.invitations[inv.ID] = inv
+	return inv, nil
+}
+
+func (r *fakeTeamRepo) AcceptInvitation(_ context.Context, inv *team.Invitation, userID uuid.UUID) (*team.TeamMember, error) {
+	now := time.Now()
+	var m *team.TeamMember
+	for _, existing := range r.members {
+		if existing.TeamID == inv.TeamID && existing.UserID == userID {
+			m = existing
+			break
+		}
+	}
+	if m == nil {
+		m = &team.TeamMember{ID: uuid.New(), TeamID: inv.TeamID, UserID: userID, CreatedAt: now}
+		r.members[m.ID] = m
+	}
+	m.Role = inv.Role
+	m.Status = team.StatusActive
+	m.InvitedBy = &inv.InvitedBy
+	m.JoinedAt = &now
+
+	inv.Status = team.InvitationAccepted
+	inv.AcceptedBy = &userID
+	inv.AcceptedAt = &now
+	r.invitations[inv.ID] = inv
+	return m, nil
+}
+
 // fakeUserRepo is a minimal user.Repository — only FindByEmail is exercised by team.Service.
 type fakeUserRepo struct {
 	byEmail map[string]*user.User
@@ -248,8 +323,8 @@ type mailCall struct {
 	extra    string // inviter name (invite) or raw token (invite link)
 }
 
-func (m *recordMailer) TeamInvite(_ context.Context, to, _, teamName, inviterName string) error {
-	m.invites = append(m.invites, mailCall{to: to, teamName: teamName, extra: inviterName})
+func (m *recordMailer) InvitationEmail(_ context.Context, to, teamName, inviterName, rawToken string) error {
+	m.invites = append(m.invites, mailCall{to: to, teamName: teamName, extra: rawToken})
 	return nil
 }
 
@@ -411,38 +486,50 @@ func TestDelete_Admin_InsufficientRole(t *testing.T) {
 	}
 }
 
-// ── InviteMember ───────────────────────────────────────────────────────────────
+// ── InviteByEmail / invitations ─────────────────────────────────────────────────
 
-func TestInviteMember_Admin_KnownEmail_CreatesInvitation(t *testing.T) {
+func TestInviteByEmail_NonMember_CreatesPendingAndEmails(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
-
 	users := newFakeUserRepo()
-	invitee := &user.User{ID: uuid.New()}
-	users.byEmail["invitee@x.com"] = invitee
+	users.byID[owner] = &user.User{ID: owner, DisplayName: "Owner Olive"}
 
-	m, err := newSvc(repo, users).InviteMember(context.Background(), tm.ID, owner, "Invitee@X.com")
+	mailer := &recordMailer{}
+	inv, err := newSvcWithMailer(repo, users, mailer).
+		InviteByEmail(context.Background(), tm.ID, owner, "Stranger@X.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if m.Status != team.StatusInvited || m.UserID != invitee.ID {
-		t.Errorf("invitation = %s for %v, want invited for %v", m.Status, m.UserID, invitee.ID)
+	if inv.Status != team.InvitationPending {
+		t.Errorf("status = %q, want pending", inv.Status)
+	}
+	if inv.Email != "stranger@x.com" {
+		t.Errorf("email = %q, want lowercased", inv.Email)
+	}
+	if inv.Role != team.RoleMember {
+		t.Errorf("role = %q, want member", inv.Role)
+	}
+	if inv.ExpiresAt.Before(time.Now().Add(6 * 24 * time.Hour)) {
+		t.Errorf("expiry %v should be ~7 days out", inv.ExpiresAt)
+	}
+	if len(mailer.invites) != 1 || mailer.invites[0].to != "stranger@x.com" {
+		t.Fatalf("want 1 invite email to the address, got %+v", mailer.invites)
 	}
 }
 
-func TestInviteMember_UnknownEmail_NotFound(t *testing.T) {
+func TestInviteByEmail_InvalidEmail(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
 
-	_, err := newSvc(repo, newFakeUserRepo()).InviteMember(context.Background(), tm.ID, owner, "ghost@x.com")
-	if !errors.Is(err, user.ErrNotFound) {
-		t.Fatalf("want user.ErrNotFound, got %v", err)
+	_, err := newSvc(repo, newFakeUserRepo()).InviteByEmail(context.Background(), tm.ID, owner, "not-an-email")
+	if !errors.Is(err, team.ErrInvalidEmail) {
+		t.Fatalf("want ErrInvalidEmail, got %v", err)
 	}
 }
 
-func TestInviteMember_AlreadyActive_AlreadyMember(t *testing.T) {
+func TestInviteByEmail_AlreadyActiveMember(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
@@ -452,46 +539,161 @@ func TestInviteMember_AlreadyActive_AlreadyMember(t *testing.T) {
 	users.byEmail["dup@x.com"] = existing
 	addMember(repo, tm.ID, existing.ID, team.RoleMember, team.StatusActive)
 
-	_, err := newSvc(repo, users).InviteMember(context.Background(), tm.ID, owner, "dup@x.com")
+	_, err := newSvc(repo, users).InviteByEmail(context.Background(), tm.ID, owner, "dup@x.com")
 	if !errors.Is(err, team.ErrAlreadyMember) {
 		t.Fatalf("want ErrAlreadyMember, got %v", err)
 	}
 }
 
-func TestInviteMember_PlainMember_InsufficientRole(t *testing.T) {
+func TestInviteByEmail_DuplicatePending(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	svc := newSvc(repo, newFakeUserRepo())
+
+	if _, err := svc.InviteByEmail(context.Background(), tm.ID, owner, "dup@x.com"); err != nil {
+		t.Fatalf("first invite failed: %v", err)
+	}
+	_, err := svc.InviteByEmail(context.Background(), tm.ID, owner, "dup@x.com")
+	if !errors.Is(err, team.ErrInvitationExists) {
+		t.Fatalf("want ErrInvitationExists, got %v", err)
+	}
+}
+
+func TestInviteByEmail_PlainMember_InsufficientRole(t *testing.T) {
 	repo := newFakeRepo()
 	tm := seedTeam(repo, uuid.New(), false)
 	member := uuid.New()
 	addMember(repo, tm.ID, member, team.RoleMember, team.StatusActive)
 
-	_, err := newSvc(repo, newFakeUserRepo()).InviteMember(context.Background(), tm.ID, member, "x@x.com")
+	_, err := newSvc(repo, newFakeUserRepo()).InviteByEmail(context.Background(), tm.ID, member, "x@x.com")
 	if !errors.Is(err, team.ErrInsufficientRole) {
 		t.Fatalf("want ErrInsufficientRole, got %v", err)
 	}
 }
 
-func TestInviteMember_KnownEmail_SendsInviteEmail(t *testing.T) {
+// inviteAndToken creates a pending invitation and returns it with its raw token,
+// which the recordMailer captures (the hash alone can't be reversed).
+func inviteAndToken(t *testing.T, repo *fakeTeamRepo, users *fakeUserRepo, teamID, inviter uuid.UUID, email string) (*team.Invitation, string) {
+	t.Helper()
+	mailer := &recordMailer{}
+	inv, err := newSvcWithMailer(repo, users, mailer).InviteByEmail(context.Background(), teamID, inviter, email)
+	if err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	if len(mailer.invites) == 0 {
+		t.Fatalf("no invite email captured")
+	}
+	return inv, mailer.invites[len(mailer.invites)-1].extra
+}
+
+func TestAcceptInvitation_HappyPath_CreatesActiveMember(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
+	inv, rawToken := inviteAndToken(t, repo, newFakeUserRepo(), tm.ID, owner, "newbie@x.com")
 
-	users := newFakeUserRepo()
-	email := "invitee@x.com"
-	invitee := &user.User{ID: uuid.New(), DisplayName: "Inv", Email: &email}
-	users.byEmail[email] = invitee
-	users.byID[owner] = &user.User{ID: owner, DisplayName: "Owner Olive"}
-
-	mailer := &recordMailer{}
-	_, err := newSvcWithMailer(repo, users, mailer).InviteMember(context.Background(), tm.ID, owner, "Invitee@X.com")
+	accepter := uuid.New()
+	m, err := newSvc(repo, newFakeUserRepo()).AcceptInvitation(context.Background(), rawToken, accepter)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("accept: %v", err)
 	}
-	if len(mailer.invites) != 1 {
-		t.Fatalf("want 1 invite email, got %d", len(mailer.invites))
+	if m.Status != team.StatusActive || m.UserID != accepter || m.Role != team.RoleMember {
+		t.Errorf("member = %+v, want active member for accepter", m)
 	}
-	got := mailer.invites[0]
-	if got.to != email || got.teamName != tm.Name || got.extra != "Owner Olive" {
-		t.Errorf("invite email = %+v, want to=%s team=%s inviter=Owner Olive", got, email, tm.Name)
+	if repo.invitations[inv.ID].Status != team.InvitationAccepted {
+		t.Errorf("invitation not marked accepted: %q", repo.invitations[inv.ID].Status)
+	}
+}
+
+func TestAcceptInvitation_InvalidToken(t *testing.T) {
+	repo := newFakeRepo()
+	_, err := newSvc(repo, newFakeUserRepo()).AcceptInvitation(context.Background(), "nope", uuid.New())
+	if !errors.Is(err, team.ErrInvitationInvalid) {
+		t.Fatalf("want ErrInvitationInvalid, got %v", err)
+	}
+}
+
+func TestAcceptInvitation_Expired(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	inv, raw := inviteAndToken(t, repo, newFakeUserRepo(), tm.ID, owner, "late@x.com")
+	repo.invitations[inv.ID].ExpiresAt = time.Now().Add(-time.Hour)
+
+	_, err := newSvc(repo, newFakeUserRepo()).AcceptInvitation(context.Background(), raw, uuid.New())
+	if !errors.Is(err, team.ErrInvitationInvalid) {
+		t.Fatalf("want ErrInvitationInvalid for expired, got %v", err)
+	}
+}
+
+func TestAcceptInvitation_Cancelled_CannotAccept(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	inv, raw := inviteAndToken(t, repo, newFakeUserRepo(), tm.ID, owner, "x@x.com")
+
+	if err := newSvc(repo, newFakeUserRepo()).CancelInvitation(context.Background(), tm.ID, inv.ID, owner); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	_, err := newSvc(repo, newFakeUserRepo()).AcceptInvitation(context.Background(), raw, uuid.New())
+	if !errors.Is(err, team.ErrInvitationInvalid) {
+		t.Fatalf("want ErrInvitationInvalid after cancel, got %v", err)
+	}
+}
+
+func TestCancelInvitation_Admin(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	svc := newSvc(repo, newFakeUserRepo())
+	inv, _ := svc.InviteByEmail(context.Background(), tm.ID, owner, "x@x.com")
+
+	if err := svc.CancelInvitation(context.Background(), tm.ID, inv.ID, owner); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if repo.invitations[inv.ID].Status != team.InvitationCancelled {
+		t.Errorf("status = %q, want cancelled", repo.invitations[inv.ID].Status)
+	}
+	// No longer listed as pending.
+	pending, _ := svc.ListInvitations(context.Background(), tm.ID, owner)
+	if len(pending) != 0 {
+		t.Errorf("want 0 pending after cancel, got %d", len(pending))
+	}
+}
+
+func TestCancelInvitation_PlainMember_InsufficientRole(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	member := uuid.New()
+	addMember(repo, tm.ID, member, team.RoleMember, team.StatusActive)
+	inv, _ := newSvc(repo, newFakeUserRepo()).InviteByEmail(context.Background(), tm.ID, owner, "x@x.com")
+
+	err := newSvc(repo, newFakeUserRepo()).CancelInvitation(context.Background(), tm.ID, inv.ID, member)
+	if !errors.Is(err, team.ErrInsufficientRole) {
+		t.Fatalf("want ErrInsufficientRole, got %v", err)
+	}
+}
+
+func TestResendInvitation_RotatesTokenAndReEmails(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	mailer := &recordMailer{}
+	svc := newSvcWithMailer(repo, newFakeUserRepo(), mailer)
+	inv, _ := svc.InviteByEmail(context.Background(), tm.ID, owner, "x@x.com")
+	oldHash := repo.invitations[inv.ID].TokenHash
+
+	updated, err := svc.ResendInvitation(context.Background(), tm.ID, inv.ID, owner)
+	if err != nil {
+		t.Fatalf("resend: %v", err)
+	}
+	if updated.TokenHash == oldHash {
+		t.Error("resend should rotate the token hash")
+	}
+	if len(mailer.invites) != 2 {
+		t.Errorf("want 2 emails (invite + resend), got %d", len(mailer.invites))
 	}
 }
 

@@ -9,6 +9,9 @@ import {
   useTeam,
   useTeamMembers,
   useInviteMember,
+  useTeamInvitations,
+  useCancelInvitation,
+  useResendInvitation,
   useAddAnonymousMember,
   useGenerateClaimToken,
   useRemoveMember,
@@ -32,7 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, UserPlus, UserX, Link2, Check } from "lucide-react";
+import { Plus, UserPlus, UserX, Link2, Check, Mail, RefreshCw, X } from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 
 import { CURRENCY_CODES, SPLIT_METHODS } from "@/constants/config";
@@ -386,6 +389,79 @@ function MembersTab({ teamId }: { teamId: string }) {
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No members found.</p>
         )}
       </div>
+
+      <PendingInvitations teamId={teamId} />
+    </div>
+  );
+}
+
+// ── Pending invitations ──────────────────────────────────────────────────────
+
+function PendingInvitations({ teamId }: { teamId: string }) {
+  const { data: invitations } = useTeamInvitations(teamId);
+  const { mutateAsync: cancelInvitation } = useCancelInvitation(teamId);
+  const { mutateAsync: resendInvitation } = useResendInvitation(teamId);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [resentId, setResentId] = useState<string | null>(null);
+
+  if (!invitations?.length) return null;
+
+  async function handleCancel(id: string) {
+    setBusyId(id);
+    try {
+      await cancelInvitation(id);
+    } catch { /* surfaced by query state */ } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleResend(id: string) {
+    setBusyId(id);
+    try {
+      await resendInvitation(id);
+      setResentId(id);
+      setTimeout(() => setResentId(null), 2000);
+    } catch { /* ignore */ } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
+        Pending invitations
+      </p>
+      {invitations.map((inv) => (
+        <div key={inv.id} className="flex items-center gap-3 p-3 border rounded-xl border-dashed bg-[hsl(var(--card))]">
+          <div className="h-8 w-8 rounded-full bg-[hsl(var(--muted))] flex items-center justify-center shrink-0">
+            <Mail className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{inv.email}</p>
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">
+              Invited{inv.inviter_name ? ` by ${inv.inviter_name}` : ""} · expires{" "}
+              {new Date(inv.expires_at).toLocaleDateString()}
+            </p>
+          </div>
+          <Badge variant="outline" className="text-xs">pending</Badge>
+          <button
+            onClick={() => handleResend(inv.id)}
+            disabled={busyId === inv.id}
+            title="Resend invitation"
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] disabled:opacity-50"
+          >
+            {resentId === inv.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={() => handleCancel(inv.id)}
+            disabled={busyId === inv.id}
+            title="Cancel invitation"
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--destructive)/0.1)] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] disabled:opacity-50"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

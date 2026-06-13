@@ -25,9 +25,9 @@ func newMailer(s email.Sender) *email.Mailer {
 	return email.NewMailer(s, "SplitLedger <no-reply@example.com>", "https://app.example.com/")
 }
 
-func TestTeamInvite_SetsFromToSubjectAndBodies(t *testing.T) {
+func TestInvitationEmail_SetsFromToSubjectAndAcceptURL(t *testing.T) {
 	s := &fakeSender{}
-	if err := newMailer(s).TeamInvite(context.Background(), "bob@x.com", "Bob", "Trip", "Alice"); err != nil {
+	if err := newMailer(s).InvitationEmail(context.Background(), "bob@x.com", "Trip", "Alice", "tok123"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if s.calls != 1 {
@@ -43,11 +43,9 @@ func TestTeamInvite_SetsFromToSubjectAndBodies(t *testing.T) {
 	if !strings.Contains(m.Subject, "Alice") || !strings.Contains(m.Subject, "Trip") {
 		t.Errorf("subject = %q, want it to mention inviter + team", m.Subject)
 	}
-	if !strings.Contains(m.HTMLBody, "Alice") || !strings.Contains(m.HTMLBody, "Trip") {
-		t.Errorf("html body missing inviter/team: %q", m.HTMLBody)
-	}
-	if m.TextBody == "" {
-		t.Error("text body should not be empty")
+	const wantURL = "https://app.example.com/invitations/tok123"
+	if !strings.Contains(m.TextBody, wantURL) {
+		t.Errorf("text body missing accept URL %q\nbody: %s", wantURL, m.TextBody)
 	}
 }
 

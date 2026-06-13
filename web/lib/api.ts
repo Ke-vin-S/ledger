@@ -75,9 +75,12 @@ async function request<T>(
   if (res.status === 401 && retry) {
     const refreshed = await refreshTokens();
     if (refreshed) return request<T>(path, init, false);
-    // Refresh failed — redirect to login
+    // Refresh failed — redirect to login, preserving where the user was so they
+    // return after signing in (e.g. an invitation accept page).
     if (typeof window !== "undefined") {
-      window.location.href = "/login"; // avoid circular import — ROUTES not used here
+      const here = window.location.pathname + window.location.search;
+      const next = here && here !== "/login" ? `?next=${encodeURIComponent(here)}` : "";
+      window.location.href = `/login${next}`; // avoid circular import — ROUTES not used here
     }
     throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
   }

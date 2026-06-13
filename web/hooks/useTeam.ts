@@ -2,10 +2,10 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Team, Member } from "@/types/team.types";
+import type { Team, Member, Invitation } from "@/types/team.types";
 import { API_ENDPOINTS } from "@/constants/api";
 
-export type { Team, Member };
+export type { Team, Member, Invitation };
 
 export function isAnonymousMember(m: Member): boolean {
   return m.identity_type === "anonymous";
@@ -79,11 +79,46 @@ export function useRemoveMember(teamId: string) {
   });
 }
 
+// useInviteMember creates a pending email invitation. Works for any email,
+// whether or not the person already has an account.
 export function useInviteMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { email: string }) =>
-      api.post(API_ENDPOINTS.teams.invite(teamId), { email: data.email }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "members"] }),
+      api.post<Invitation>(API_ENDPOINTS.teams.invitations(teamId), { email: data.email }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "invitations"] }),
+  });
+}
+
+export function useTeamInvitations(teamId: string) {
+  return useQuery<Invitation[]>({
+    queryKey: ["teams", teamId, "invitations"],
+    queryFn: () => api.get<Invitation[]>(API_ENDPOINTS.teams.invitations(teamId)),
+    enabled: !!teamId,
+  });
+}
+
+export function useCancelInvitation(teamId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      api.delete(API_ENDPOINTS.teams.cancelInvitation(teamId, invitationId)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "invitations"] }),
+  });
+}
+
+export function useResendInvitation(teamId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      api.post<Invitation>(API_ENDPOINTS.teams.resendInvitation(teamId, invitationId)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teams", teamId, "invitations"] }),
+  });
+}
+
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      api.post<{ team_id: string }>(API_ENDPOINTS.acceptInvitation(token)),
   });
 }
