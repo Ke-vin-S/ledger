@@ -189,6 +189,7 @@ func run() error {
 	r.Mount("/v1/users", userH.Routes(authMW))
 	r.Mount("/v1/teams", teamH.Routes(authMW))
 	r.With(authMW).Post("/v1/invite/{token}", teamH.JoinViaInviteLink)
+	r.With(authMW).Post("/v1/invitations/{token}/accept", teamH.AcceptInvitation)
 	r.Mount("/v1/expenses", expenseH.Routes(authMW))
 
 	// Team-scoped expense routes sit under the team router.

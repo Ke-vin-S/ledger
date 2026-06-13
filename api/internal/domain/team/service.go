@@ -18,7 +18,7 @@ import (
 // Mailer sends the transactional emails this service triggers.
 // Implemented by *email.Mailer; failures are best-effort and never fail the request.
 type Mailer interface {
-	TeamInvite(ctx context.Context, to, inviteeName, teamName, inviterName string) error
+	InvitationEmail(ctx context.Context, to, teamName, inviterName, rawToken string) error
 	JoinApproved(ctx context.Context, to, userName, teamName string) error
 	JoinRejected(ctx context.Context, to, userName, teamName string) error
 	InviteLink(ctx context.Context, to, teamName, rawToken string) error
@@ -149,37 +149,176 @@ func (s *Service) ListMembers(ctx context.Context, teamID, requesterID uuid.UUID
 	return s.repo.ListMembers(ctx, teamID)
 }
 
-// InviteMember invites a registered user by email. Requires admin+.
-func (s *Service) InviteMember(ctx context.Context, teamID, inviterID uuid.UUID, email string) (*TeamMember, error) {
+// invitationTTL is how long a pending invitation remains valid.
+const invitationTTL = 7 * 24 * time.Hour
+
+// InviteByEmail creates a pending email invitation and emails an accept link.
+// Works whether or not the email already belongs to a user. Requires admin+.
+// The invitee joins as a plain member when they accept.
+func (s *Service) InviteByEmail(ctx context.Context, teamID, inviterID uuid.UUID, email string) (*Invitation, error) {
 	if _, err := s.requireMembership(ctx, teamID, inviterID, RoleAdmin); err != nil {
 		return nil, err
 	}
-	invitee, err := s.userRepo.FindByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
-	if err != nil {
-		return nil, user.ErrNotFound
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !looksLikeEmail(email) {
+		return nil, ErrInvalidEmail
 	}
-	m, err := s.upsertInvitation(ctx, teamID, invitee.ID, inviterID)
+
+	// Reject if the email already belongs to an active member.
+	if u, err := s.userRepo.FindByEmail(ctx, email); err == nil {
+		if m, err := s.repo.GetMembership(ctx, teamID, u.ID); err == nil && m.Status == StatusActive {
+			return nil, ErrAlreadyMember
+		}
+	}
+	// Reject if there is already a pending invitation for this email.
+	if _, err := s.repo.FindPendingInvitation(ctx, teamID, email); err == nil {
+		return nil, ErrInvitationExists
+	}
+
+	rawToken, tokenHash, err := newInviteToken()
 	if err != nil {
 		return nil, err
 	}
-	s.sendInviteEmail(ctx, teamID, inviterID, invitee)
+	inv := &Invitation{
+		TeamID:    teamID,
+		Email:     email,
+		Role:      RoleMember,
+		Status:    InvitationPending,
+		TokenHash: tokenHash,
+		InvitedBy: inviterID,
+		ExpiresAt: time.Now().Add(invitationTTL),
+	}
+	created, err := s.repo.CreateInvitation(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
+	s.emailInvitation(ctx, created, rawToken)
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberInvited,
+		ActorID:    &inviterID,
+		TeamID:     &teamID,
+		EntityType: "team_invitation",
+		EntityID:   created.ID,
+		Meta:       map[string]any{"email": email},
+	})
+	return created, nil
+}
+
+// ListInvitations returns pending invitations for a team. Requires admin+.
+func (s *Service) ListInvitations(ctx context.Context, teamID, requesterID uuid.UUID) ([]*Invitation, error) {
+	if _, err := s.requireMembership(ctx, teamID, requesterID, RoleAdmin); err != nil {
+		return nil, err
+	}
+	return s.repo.ListPendingInvitations(ctx, teamID)
+}
+
+// CancelInvitation revokes a pending invitation. Requires admin+.
+func (s *Service) CancelInvitation(ctx context.Context, teamID, invitationID, requesterID uuid.UUID) error {
+	if _, err := s.requireMembership(ctx, teamID, requesterID, RoleAdmin); err != nil {
+		return err
+	}
+	inv, err := s.repo.GetInvitationByID(ctx, invitationID)
+	if err != nil || inv.TeamID != teamID {
+		return ErrInvitationNotFound
+	}
+	if inv.Status != InvitationPending {
+		return ErrInvitationInvalid
+	}
+	now := time.Now()
+	inv.Status = InvitationCancelled
+	inv.CancelledBy = &requesterID
+	inv.CancelledAt = &now
+	if _, err := s.repo.UpdateInvitation(ctx, inv); err != nil {
+		return err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberRejected,
+		ActorID:    &requesterID,
+		TeamID:     &teamID,
+		EntityType: "team_invitation",
+		EntityID:   inv.ID,
+	})
+	return nil
+}
+
+// ResendInvitation rotates the token, resets the expiry, and re-emails a pending
+// invitation. Requires admin+.
+func (s *Service) ResendInvitation(ctx context.Context, teamID, invitationID, requesterID uuid.UUID) (*Invitation, error) {
+	if _, err := s.requireMembership(ctx, teamID, requesterID, RoleAdmin); err != nil {
+		return nil, err
+	}
+	inv, err := s.repo.GetInvitationByID(ctx, invitationID)
+	if err != nil || inv.TeamID != teamID {
+		return nil, ErrInvitationNotFound
+	}
+	if inv.Status != InvitationPending {
+		return nil, ErrInvitationInvalid
+	}
+	rawToken, tokenHash, err := newInviteToken()
+	if err != nil {
+		return nil, err
+	}
+	inv.TokenHash = tokenHash
+	inv.ExpiresAt = time.Now().Add(invitationTTL)
+	updated, err := s.repo.UpdateInvitation(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
+	s.emailInvitation(ctx, updated, rawToken)
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberInvited,
+		ActorID:    &requesterID,
+		TeamID:     &teamID,
+		EntityType: "team_invitation",
+		EntityID:   updated.ID,
+		Meta:       map[string]any{"resent": true},
+	})
+	return updated, nil
+}
+
+// AcceptInvitation consumes an invitation token and makes the authenticated user
+// an active member. The invitation's token is the secret — the accepting user's
+// email need not match the invited address.
+func (s *Service) AcceptInvitation(ctx context.Context, rawToken string, userID uuid.UUID) (*TeamMember, error) {
+	inv, err := s.repo.FindInvitationByHash(ctx, hashLinkToken(rawToken))
+	if err != nil {
+		return nil, ErrInvitationInvalid
+	}
+	if inv.Status != InvitationPending || time.Now().After(inv.ExpiresAt) {
+		return nil, ErrInvitationInvalid
+	}
+	if m, err := s.repo.GetMembership(ctx, inv.TeamID, userID); err == nil && m.Status == StatusActive {
+		return nil, ErrAlreadyMember
+	}
+	m, err := s.repo.AcceptInvitation(ctx, inv, userID)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberApproved,
+		ActorID:    &userID,
+		TeamID:     &inv.TeamID,
+		EntityType: "team_member",
+		EntityID:   m.ID,
+		Meta:       map[string]any{"via_invitation": inv.ID.String()},
+	})
 	return m, nil
 }
 
-// sendInviteEmail best-effort notifies an invited user. Never fails the request.
-func (s *Service) sendInviteEmail(ctx context.Context, teamID, inviterID uuid.UUID, invitee *user.User) {
-	if s.mailer == nil || invitee.Email == nil {
+// emailInvitation best-effort emails the accept link. Never fails the request.
+func (s *Service) emailInvitation(ctx context.Context, inv *Invitation, rawToken string) {
+	if s.mailer == nil {
 		return
 	}
-	t, err := s.repo.FindByID(ctx, teamID)
+	t, err := s.repo.FindByID(ctx, inv.TeamID)
 	if err != nil {
 		return
 	}
 	inviterName := "A team admin"
-	if inviter, err := s.userRepo.FindByID(ctx, inviterID); err == nil {
-		inviterName = inviter.DisplayName
+	if u, err := s.userRepo.FindByID(ctx, inv.InvitedBy); err == nil {
+		inviterName = u.DisplayName
 	}
-	_ = s.mailer.TeamInvite(ctx, *invitee.Email, invitee.DisplayName, t.Name, inviterName)
+	_ = s.mailer.InvitationEmail(ctx, inv.Email, t.Name, inviterName, rawToken)
 }
 
 // AddAnonymousMember adds an existing anonymous user to the team as an active member. Requires member+.
@@ -228,53 +367,6 @@ func (s *Service) AddAnonymousMember(ctx context.Context, teamID, requesterID, a
 	_ = s.auditor.Log(ctx, audit.Entry{
 		Action:     audit.ActionMemberInvited,
 		ActorID:    &requesterID,
-		TeamID:     &teamID,
-		EntityType: "team_member",
-		EntityID:   created.ID,
-	})
-	return created, nil
-}
-
-// upsertInvitation handles both new invitations and re-invitations after removal.
-func (s *Service) upsertInvitation(ctx context.Context, teamID, userID, inviterID uuid.UUID) (*TeamMember, error) {
-	existing, err := s.repo.GetMembership(ctx, teamID, userID)
-	if err == nil {
-		switch existing.Status {
-		case StatusActive, StatusInvited, StatusRequested:
-			return nil, ErrAlreadyMember
-		}
-		// Re-invite after removed/rejected/left.
-		existing.Status = StatusInvited
-		existing.InvitedBy = &inviterID
-		existing.ResolvedBy = nil
-		existing.ResolvedAt = nil
-		m, err := s.repo.UpdateMember(ctx, existing)
-		if err != nil {
-			return nil, err
-		}
-		_ = s.auditor.Log(ctx, audit.Entry{
-			Action:     audit.ActionMemberInvited,
-			ActorID:    &inviterID,
-			TeamID:     &teamID,
-			EntityType: "team_member",
-			EntityID:   m.ID,
-		})
-		return m, nil
-	}
-	m := &TeamMember{
-		TeamID:    teamID,
-		UserID:    userID,
-		Role:      RoleMember,
-		Status:    StatusInvited,
-		InvitedBy: &inviterID,
-	}
-	created, err := s.repo.InsertMember(ctx, m)
-	if err != nil {
-		return nil, err
-	}
-	_ = s.auditor.Log(ctx, audit.Entry{
-		Action:     audit.ActionMemberInvited,
-		ActorID:    &inviterID,
 		TeamID:     &teamID,
 		EntityType: "team_member",
 		EntityID:   created.ID,
@@ -639,4 +731,20 @@ func validateRoleChange(requesterRole, targetCurrentRole, newRole string) error 
 func hashLinkToken(raw string) string {
 	h := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(h[:])
+}
+
+// newInviteToken returns a random raw token and its sha256 hash for storage.
+func newInviteToken() (raw, hash string, err error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("generate token: %w", err)
+	}
+	raw = hex.EncodeToString(b)
+	return raw, hashLinkToken(raw), nil
+}
+
+// looksLikeEmail is a minimal sanity check — real validation happens on delivery.
+func looksLikeEmail(s string) bool {
+	at := strings.IndexByte(s, '@')
+	return at > 0 && at < len(s)-1 && !strings.ContainsAny(s, " \t")
 }

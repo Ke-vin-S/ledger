@@ -35,7 +35,6 @@ func (h *Handler) Routes(authMW func(http.Handler) http.Handler) chi.Router {
 
 	// Membership
 	r.Get("/{teamID}/members", h.ListMembers)
-	r.Post("/{teamID}/members/invite", h.InviteMember)
 	r.Post("/{teamID}/members/anonymous", h.AddAnonymousMember)
 	r.Post("/{teamID}/members/request", h.RequestJoin)
 	r.Get("/{teamID}/members/requests", h.ListJoinRequests)
@@ -43,6 +42,12 @@ func (h *Handler) Routes(authMW func(http.Handler) http.Handler) chi.Router {
 	r.Post("/{teamID}/members/requests/{rid}/reject", h.RejectJoin)
 	r.Patch("/{teamID}/members/{uid}/role", h.ChangeRole)
 	r.Delete("/{teamID}/members/{uid}", h.RemoveMember)
+
+	// Email invitations
+	r.Post("/{teamID}/invitations", h.InviteByEmail)
+	r.Get("/{teamID}/invitations", h.ListInvitations)
+	r.Delete("/{teamID}/invitations/{invID}", h.CancelInvitation)
+	r.Post("/{teamID}/invitations/{invID}/resend", h.ResendInvitation)
 
 	// Invite links
 	r.Post("/{teamID}/invite-links", h.CreateInviteLink)
@@ -170,7 +175,8 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	handler.JSON(w, r, http.StatusOK, toMemberResponses(members))
 }
 
-func (h *Handler) InviteMember(w http.ResponseWriter, r *http.Request) {
+// InviteByEmail creates a pending email invitation (works for non-registered emails too).
+func (h *Handler) InviteByEmail(w http.ResponseWriter, r *http.Request) {
 	uid := jwtauth.MustUserID(r.Context())
 	teamID, ok := parseUUID(w, r, "teamID")
 	if !ok {
@@ -182,12 +188,81 @@ func (h *Handler) InviteMember(w http.ResponseWriter, r *http.Request) {
 	if !handler.Decode(w, r, &body) {
 		return
 	}
-	m, err := h.teams.InviteMember(r.Context(), teamID, uid, body.Email)
+	inv, err := h.teams.InviteByEmail(r.Context(), teamID, uid, body.Email)
 	if err != nil {
 		h.handleError(w, r, err)
 		return
 	}
-	handler.JSON(w, r, http.StatusCreated, toMemberResponse(m))
+	handler.JSON(w, r, http.StatusCreated, toInvitationResponse(inv))
+}
+
+func (h *Handler) ListInvitations(w http.ResponseWriter, r *http.Request) {
+	uid := jwtauth.MustUserID(r.Context())
+	teamID, ok := parseUUID(w, r, "teamID")
+	if !ok {
+		return
+	}
+	invs, err := h.teams.ListInvitations(r.Context(), teamID, uid)
+	if err != nil {
+		h.handleError(w, r, err)
+		return
+	}
+	resp := make([]invitationResponse, len(invs))
+	for i, inv := range invs {
+		resp[i] = toInvitationResponse(inv)
+	}
+	handler.JSON(w, r, http.StatusOK, resp)
+}
+
+func (h *Handler) CancelInvitation(w http.ResponseWriter, r *http.Request) {
+	uid := jwtauth.MustUserID(r.Context())
+	teamID, ok := parseUUID(w, r, "teamID")
+	if !ok {
+		return
+	}
+	invID, ok := parseUUID(w, r, "invID")
+	if !ok {
+		return
+	}
+	if err := h.teams.CancelInvitation(r.Context(), teamID, invID, uid); err != nil {
+		h.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ResendInvitation(w http.ResponseWriter, r *http.Request) {
+	uid := jwtauth.MustUserID(r.Context())
+	teamID, ok := parseUUID(w, r, "teamID")
+	if !ok {
+		return
+	}
+	invID, ok := parseUUID(w, r, "invID")
+	if !ok {
+		return
+	}
+	inv, err := h.teams.ResendInvitation(r.Context(), teamID, invID, uid)
+	if err != nil {
+		h.handleError(w, r, err)
+		return
+	}
+	handler.JSON(w, r, http.StatusOK, toInvitationResponse(inv))
+}
+
+// AcceptInvitation is mounted separately at POST /v1/invitations/{token}/accept.
+func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	uid := jwtauth.MustUserID(r.Context())
+	rawToken := chi.URLParam(r, "token")
+	if rawToken == "" {
+		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", "token is required")
+		return
+	}
+	m, err := h.teams.AcceptInvitation(r.Context(), rawToken, uid)
+	if err != nil {
+		h.handleError(w, r, err)
+		return
+	}
+	handler.JSON(w, r, http.StatusOK, toMemberResponse(m))
 }
 
 func (h *Handler) AddAnonymousMember(w http.ResponseWriter, r *http.Request) {
@@ -484,6 +559,30 @@ func toMemberResponses(members []*team.TeamMember) []memberResponse {
 	return resp
 }
 
+type invitationResponse struct {
+	ID          uuid.UUID `json:"id"`
+	TeamID      uuid.UUID `json:"team_id"`
+	Email       string    `json:"email"`
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+	InviterName string    `json:"inviter_name,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func toInvitationResponse(inv *team.Invitation) invitationResponse {
+	return invitationResponse{
+		ID:          inv.ID,
+		TeamID:      inv.TeamID,
+		Email:       inv.Email,
+		Role:        inv.Role,
+		Status:      inv.Status,
+		InviterName: inv.InviterName,
+		ExpiresAt:   inv.ExpiresAt,
+		CreatedAt:   inv.CreatedAt,
+	}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error) {
@@ -502,6 +601,14 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 		handler.Error(w, r, http.StatusBadRequest, "INVITE_LINK_EXHAUSTED", "invite link is invalid, expired, or exhausted")
 	case team.ErrCannotRemoveOwner:
 		handler.Error(w, r, http.StatusBadRequest, "CANNOT_REMOVE_OWNER", "cannot remove the team owner")
+	case team.ErrInvitationNotFound:
+		handler.Error(w, r, http.StatusNotFound, "INVITATION_NOT_FOUND", "invitation not found")
+	case team.ErrInvitationInvalid:
+		handler.Error(w, r, http.StatusBadRequest, "INVITATION_INVALID", "invitation is invalid, expired, or already used")
+	case team.ErrInvitationExists:
+		handler.Error(w, r, http.StatusConflict, "INVITATION_EXISTS", "a pending invitation already exists for this email")
+	case team.ErrInvalidEmail:
+		handler.ErrorField(w, r, http.StatusBadRequest, "INVALID_EMAIL", "a valid email address is required", "email")
 	default:
 		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 	}

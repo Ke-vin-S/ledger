@@ -269,6 +269,139 @@ func (r *teamRepo) IncrementInviteLinkUse(ctx context.Context, linkID uuid.UUID,
 	return err
 }
 
+// ── Email invitations ────────────────────────────────────────────────────────
+
+const invitationCols = `id, team_id, email, role, status, token_hash, invited_by,
+	expires_at, accepted_by, accepted_at, cancelled_by, cancelled_at, created_at`
+
+func (r *teamRepo) CreateInvitation(ctx context.Context, inv *team.Invitation) (*team.Invitation, error) {
+	row := r.pool.QueryRow(ctx, `
+		INSERT INTO team_invitations (team_id, email, role, status, token_hash, invited_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING `+invitationCols, inv.TeamID, inv.Email, inv.Role, inv.Status,
+		inv.TokenHash, inv.InvitedBy, inv.ExpiresAt)
+	return scanInvitation(row)
+}
+
+func (r *teamRepo) GetInvitationByID(ctx context.Context, id uuid.UUID) (*team.Invitation, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+invitationCols+` FROM team_invitations WHERE id = $1`, id)
+	inv, err := scanInvitation(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, team.ErrInvitationNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (r *teamRepo) FindInvitationByHash(ctx context.Context, tokenHash string) (*team.Invitation, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+invitationCols+` FROM team_invitations WHERE token_hash = $1`, tokenHash)
+	inv, err := scanInvitation(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, team.ErrInvitationInvalid
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (r *teamRepo) FindPendingInvitation(ctx context.Context, teamID uuid.UUID, email string) (*team.Invitation, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+invitationCols+`
+		FROM team_invitations
+		WHERE team_id = $1 AND lower(email) = lower($2) AND status = 'pending'
+	`, teamID, email)
+	inv, err := scanInvitation(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, team.ErrInvitationNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (r *teamRepo) ListPendingInvitations(ctx context.Context, teamID uuid.UUID) ([]*team.Invitation, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT i.id, i.team_id, i.email, i.role, i.status, i.token_hash, i.invited_by,
+		       i.expires_at, i.accepted_by, i.accepted_at, i.cancelled_by, i.cancelled_at, i.created_at,
+		       u.display_name, t.name
+		FROM team_invitations i
+		JOIN users u ON u.id = i.invited_by
+		JOIN teams t ON t.id = i.team_id
+		WHERE i.team_id = $1 AND i.status = 'pending'
+		ORDER BY i.created_at DESC
+	`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*team.Invitation
+	for rows.Next() {
+		var inv team.Invitation
+		if err := rows.Scan(
+			&inv.ID, &inv.TeamID, &inv.Email, &inv.Role, &inv.Status, &inv.TokenHash, &inv.InvitedBy,
+			&inv.ExpiresAt, &inv.AcceptedBy, &inv.AcceptedAt, &inv.CancelledBy, &inv.CancelledAt, &inv.CreatedAt,
+			&inv.InviterName, &inv.TeamName,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, &inv)
+	}
+	return out, rows.Err()
+}
+
+func (r *teamRepo) UpdateInvitation(ctx context.Context, inv *team.Invitation) (*team.Invitation, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE team_invitations
+		SET role = $1, status = $2, token_hash = $3, expires_at = $4,
+		    accepted_by = $5, accepted_at = $6, cancelled_by = $7, cancelled_at = $8,
+		    updated_at = NOW()
+		WHERE id = $9
+		RETURNING `+invitationCols, inv.Role, inv.Status, inv.TokenHash, inv.ExpiresAt,
+		inv.AcceptedBy, inv.AcceptedAt, inv.CancelledBy, inv.CancelledAt, inv.ID)
+	return scanInvitation(row)
+}
+
+func (r *teamRepo) AcceptInvitation(ctx context.Context, inv *team.Invitation, userID uuid.UUID) (*team.TeamMember, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Upsert an active membership. The unique (team_id, user_id) constraint lets a
+	// previously removed/left member be reactivated.
+	row := tx.QueryRow(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, status, invited_by, joined_at)
+		VALUES ($1, $2, $3, 'active', $4, NOW())
+		ON CONFLICT (team_id, user_id) DO UPDATE
+		    SET status = 'active', role = EXCLUDED.role,
+		        invited_by = EXCLUDED.invited_by, joined_at = NOW()
+		RETURNING id, team_id, user_id, role, status,
+		          invited_by, request_message, resolved_by, resolved_at, joined_at, created_at
+	`, inv.TeamID, userID, inv.Role, inv.InvitedBy)
+	m, err := scanMemberCore(row)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE team_invitations
+		SET status = 'accepted', accepted_by = $1, accepted_at = NOW(), updated_at = NOW()
+		WHERE id = $2
+	`, userID, inv.ID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // ── Scanners ─────────────────────────────────────────────────────────────────
 
 func scanTeam(row pgx.Row) (*team.Team, error) {
@@ -352,4 +485,16 @@ func scanInviteLink(row pgx.Row) (*team.InviteLink, error) {
 		return nil, err
 	}
 	return &l, nil
+}
+
+func scanInvitation(row pgx.Row) (*team.Invitation, error) {
+	var inv team.Invitation
+	err := row.Scan(
+		&inv.ID, &inv.TeamID, &inv.Email, &inv.Role, &inv.Status, &inv.TokenHash, &inv.InvitedBy,
+		&inv.ExpiresAt, &inv.AcceptedBy, &inv.AcceptedAt, &inv.CancelledBy, &inv.CancelledAt, &inv.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
 }
