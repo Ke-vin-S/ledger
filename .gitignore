@@ -37,6 +37,7 @@ api/tmp/
 # CDK outputs
 infra/cdk.out/
 infra/node_modules/
+infra/dist/
 
 # Next.js
 web/.next/

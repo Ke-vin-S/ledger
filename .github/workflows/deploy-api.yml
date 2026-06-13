@@ -23,9 +23,9 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: api/go.mod
           cache-dependency-path: api/go.sum
@@ -33,18 +33,36 @@ jobs:
       - name: Run unit tests
         run: go test ./... -race -count=1 -short
 
+  integration:
+    name: Integration (testcontainers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      # Docker is preinstalled on ubuntu-latest; testcontainers spins up Postgres.
+      - name: Run full test suite (incl. repository integration tests)
+        run: go test ./... -race -count=1
+
   migrate:
     name: Migrate
-    needs: test
+    needs: [test, integration]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: api/go.mod
           cache-dependency-path: api/go.sum
@@ -67,9 +85,9 @@ jobs:
         working-directory: api
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: api/go.mod
           cache-dependency-path: api/go.sum
@@ -85,7 +103,7 @@ jobs:
         run: zip function.zip bootstrap
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ap-south-1
