@@ -153,7 +153,7 @@ func (stubUserRepo) CreateClaimToken(context.Context, uuid.UUID, uuid.UUID, stri
 func (stubUserRepo) Claim(context.Context, string, uuid.UUID) (uuid.UUID, error) { return uuid.Nil, nil }
 
 func router(repo *fakeTeamRepo, actor uuid.UUID) http.Handler {
-	svc := team.NewService(repo, stubUserRepo{}, audit.NopLogger())
+	svc := team.NewService(repo, stubUserRepo{}, audit.NopLogger(), nil)
 	h := New(svc, "https://app.example.com")
 	root := chi.NewRouter()
 	root.Mount("/teams", h.Routes(authAs(actor)))

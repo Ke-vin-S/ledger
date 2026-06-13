@@ -15,14 +15,24 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 )
 
+// Mailer sends the transactional emails this service triggers.
+// Implemented by *email.Mailer; failures are best-effort and never fail the request.
+type Mailer interface {
+	TeamInvite(ctx context.Context, to, inviteeName, teamName, inviterName string) error
+	JoinApproved(ctx context.Context, to, userName, teamName string) error
+	JoinRejected(ctx context.Context, to, userName, teamName string) error
+	InviteLink(ctx context.Context, to, teamName, rawToken string) error
+}
+
 type Service struct {
 	repo     Repository
 	userRepo user.Repository
 	auditor  audit.Logger
+	mailer   Mailer
 }
 
-func NewService(repo Repository, userRepo user.Repository, auditor audit.Logger) *Service {
-	return &Service{repo: repo, userRepo: userRepo, auditor: auditor}
+func NewService(repo Repository, userRepo user.Repository, auditor audit.Logger, mailer Mailer) *Service {
+	return &Service{repo: repo, userRepo: userRepo, auditor: auditor, mailer: mailer}
 }
 
 // Create creates a team and adds the creator as owner in a single transaction.
@@ -148,7 +158,28 @@ func (s *Service) InviteMember(ctx context.Context, teamID, inviterID uuid.UUID,
 	if err != nil {
 		return nil, user.ErrNotFound
 	}
-	return s.upsertInvitation(ctx, teamID, invitee.ID, inviterID)
+	m, err := s.upsertInvitation(ctx, teamID, invitee.ID, inviterID)
+	if err != nil {
+		return nil, err
+	}
+	s.sendInviteEmail(ctx, teamID, inviterID, invitee)
+	return m, nil
+}
+
+// sendInviteEmail best-effort notifies an invited user. Never fails the request.
+func (s *Service) sendInviteEmail(ctx context.Context, teamID, inviterID uuid.UUID, invitee *user.User) {
+	if s.mailer == nil || invitee.Email == nil {
+		return
+	}
+	t, err := s.repo.FindByID(ctx, teamID)
+	if err != nil {
+		return
+	}
+	inviterName := "A team admin"
+	if inviter, err := s.userRepo.FindByID(ctx, inviterID); err == nil {
+		inviterName = inviter.DisplayName
+	}
+	_ = s.mailer.TeamInvite(ctx, *invitee.Email, invitee.DisplayName, t.Name, inviterName)
 }
 
 // AddAnonymousMember adds an existing anonymous user to the team as an active member. Requires member+.
@@ -324,7 +355,28 @@ func (s *Service) ApproveJoin(ctx context.Context, teamID uuid.UUID, requestID, 
 		EntityType: "team_member",
 		EntityID:   m.ID,
 	})
+	s.sendJoinDecisionEmail(ctx, teamID, m.UserID, true)
 	return m, nil
+}
+
+// sendJoinDecisionEmail best-effort notifies a requester of an approve/reject decision.
+func (s *Service) sendJoinDecisionEmail(ctx context.Context, teamID, userID uuid.UUID, approved bool) {
+	if s.mailer == nil {
+		return
+	}
+	u, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil || u.Email == nil {
+		return
+	}
+	t, err := s.repo.FindByID(ctx, teamID)
+	if err != nil {
+		return
+	}
+	if approved {
+		_ = s.mailer.JoinApproved(ctx, *u.Email, u.DisplayName, t.Name)
+	} else {
+		_ = s.mailer.JoinRejected(ctx, *u.Email, u.DisplayName, t.Name)
+	}
 }
 
 // RejectJoin rejects a join request. Requires admin+.
@@ -351,6 +403,7 @@ func (s *Service) RejectJoin(ctx context.Context, teamID uuid.UUID, requestID, a
 		EntityType: "team_member",
 		EntityID:   m.ID,
 	})
+	s.sendJoinDecisionEmail(ctx, teamID, m.UserID, false)
 	return m, nil
 }
 
@@ -445,7 +498,9 @@ func (s *Service) RemoveMember(ctx context.Context, teamID, targetUserID, reques
 
 // CreateInviteLink generates an invite link. Requires admin+.
 // Returns the InviteLink and the raw token (to embed in the URL).
-func (s *Service) CreateInviteLink(ctx context.Context, teamID, createdBy uuid.UUID, maxUses *int, expiresInHours *int) (*InviteLink, string, error) {
+// If email is non-nil and non-empty, the freshly-created link is emailed to it
+// (best-effort — email failure does not fail link creation).
+func (s *Service) CreateInviteLink(ctx context.Context, teamID, createdBy uuid.UUID, maxUses *int, expiresInHours *int, email *string) (*InviteLink, string, error) {
 	if _, err := s.requireMembership(ctx, teamID, createdBy, RoleAdmin); err != nil {
 		return nil, "", err
 	}
@@ -471,6 +526,13 @@ func (s *Service) CreateInviteLink(ctx context.Context, teamID, createdBy uuid.U
 	created, err := s.repo.CreateInviteLink(ctx, link)
 	if err != nil {
 		return nil, "", err
+	}
+	if s.mailer != nil && email != nil {
+		if to := strings.TrimSpace(*email); to != "" {
+			if t, err := s.repo.FindByID(ctx, teamID); err == nil {
+				_ = s.mailer.InviteLink(ctx, to, t.Name, rawToken)
+			}
+		}
 	}
 	return created, rawToken, nil
 }

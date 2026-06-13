@@ -141,8 +141,8 @@ func (r *fakeUserRepo) Claim(_ context.Context, tokenHash string, _ uuid.UUID) (
 
 // fakeResetStore implements user.PasswordResetStore.
 type fakeResetStore struct {
-	stored  map[string]uuid.UUID
-	getErr  error
+	stored map[string]uuid.UUID
+	getErr error
 }
 
 func newResetStore() *fakeResetStore { return &fakeResetStore{stored: make(map[string]uuid.UUID)} }
@@ -165,7 +165,23 @@ func (s *fakeResetStore) GetAndDeleteReset(_ context.Context, tokenHash string) 
 }
 
 func newSvc(repo user.Repository) *user.Service {
-	return user.NewService(repo, audit.NopLogger())
+	return user.NewService(repo, audit.NopLogger(), nil)
+}
+
+// recordMailer records the last PasswordReset call for assertions.
+type recordMailer struct {
+	called   bool
+	to       string
+	userName string
+	rawToken string
+}
+
+func (m *recordMailer) PasswordReset(_ context.Context, to, userName, rawToken string) error {
+	m.called = true
+	m.to = to
+	m.userName = userName
+	m.rawToken = rawToken
+	return nil
 }
 
 // ── Register ───────────────────────────────────────────────────────────────────
@@ -458,6 +474,41 @@ func TestGeneratePasswordResetToken_KnownEmail_StoresHashedToken(t *testing.T) {
 		if id != u.ID {
 			t.Errorf("stored token maps to %v, want %v", id, u.ID)
 		}
+	}
+}
+
+func TestGeneratePasswordResetToken_KnownEmail_SendsEmail(t *testing.T) {
+	repo := newFakeRepo()
+	seedRegistered(t, repo, "reset@me.com", "supersecret")
+	store := newResetStore()
+	mailer := &recordMailer{}
+	svc := user.NewService(repo, audit.NopLogger(), mailer)
+
+	raw, err := svc.GeneratePasswordResetToken(context.Background(), "reset@me.com", store)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mailer.called {
+		t.Fatal("expected a password-reset email to be sent")
+	}
+	if mailer.to != "reset@me.com" {
+		t.Errorf("email sent to %q, want reset@me.com", mailer.to)
+	}
+	if mailer.rawToken != raw {
+		t.Errorf("email token %q != returned token %q", mailer.rawToken, raw)
+	}
+}
+
+func TestGeneratePasswordResetToken_UnknownEmail_NoEmail(t *testing.T) {
+	store := newResetStore()
+	mailer := &recordMailer{}
+	svc := user.NewService(newFakeRepo(), audit.NopLogger(), mailer)
+
+	if _, err := svc.GeneratePasswordResetToken(context.Background(), "ghost@nowhere.com", store); err != nil {
+		t.Fatalf("expected silent success, got %v", err)
+	}
+	if mailer.called {
+		t.Error("no email should be sent for an unknown email (no enumeration)")
 	}
 }
 
