@@ -64,6 +64,21 @@ else
   echo "Execution role already exists — skipping."
 fi
 
+# Allow the function to send email through SES. Idempotent — put overwrites.
+# Tighten "Resource" to a specific verified identity ARN if you want least privilege.
+echo "Attaching SES send-email policy to execution role..."
+aws iam put-role-policy \
+  --role-name "$EXEC_ROLE_NAME" \
+  --policy-name SendEmailPolicy \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "*"
+    }]
+  }' >/dev/null
+
 # ── Lambda function ───────────────────────────────────────────────────────────
 
 # Build a minimal placeholder zip so the function can be created.
@@ -121,6 +136,7 @@ aws lambda update-function-configuration \
     REDIS_URL=REPLACE_ME,
     JWT_PRIVATE_KEY=REPLACE_ME,
     JWT_PUBLIC_KEY=REPLACE_ME,
+    EMAIL_FROM=REPLACE_ME,
   }" \
   --region "$REGION" >/dev/null
 
@@ -217,7 +233,7 @@ if ! aws iam get-role --role-name "$DEPLOY_ROLE_NAME" &>/dev/null; then
         ],
         \"Resource\": \"arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${FUNCTION_NAME}\"
       }]
-    }" >/dev/null
+    }" >//null
 
   echo "Deploy role created: $DEPLOY_ROLE_ARN"
 else
@@ -231,6 +247,9 @@ echo "Setup complete."
 echo ""
 echo "Next steps:"
 echo "  1. Update the REPLACE_ME env vars on the Lambda function (console or CLI)."
+echo "     EMAIL_FROM must be a verified SES sender, e.g. 'SplitLedger <no-reply@ledger.kevinsanjula.me>'."
+echo "     Leave EMAIL_FROM empty to disable email sending (the API logs emails instead)."
+echo "     Verify a domain/identity in SES (ap-south-1) and request production access first."
 echo "  2. Add this GitHub secret to the repo:"
 echo "       Name:  AWS_DEPLOY_ROLE_ARN"
 echo "       Value: ${DEPLOY_ROLE_ARN}"

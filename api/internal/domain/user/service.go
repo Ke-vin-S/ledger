@@ -16,13 +16,20 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
 )
 
-type Service struct {
-	repo   Repository
-	auditor audit.Logger
+// Mailer sends the transactional emails this service triggers.
+// Implemented by *email.Mailer; failures are best-effort and never fail the request.
+type Mailer interface {
+	PasswordReset(ctx context.Context, to, userName, rawToken string) error
 }
 
-func NewService(repo Repository, auditor audit.Logger) *Service {
-	return &Service{repo: repo, auditor: auditor}
+type Service struct {
+	repo    Repository
+	auditor audit.Logger
+	mailer  Mailer
+}
+
+func NewService(repo Repository, auditor audit.Logger, mailer Mailer) *Service {
+	return &Service{repo: repo, auditor: auditor, mailer: mailer}
 }
 
 // Register creates a new registered user with an email and password.
@@ -281,8 +288,8 @@ func (s *Service) ClaimAnonymous(ctx context.Context, rawToken string, claimedBy
 		EntityType: "user",
 		EntityID:   anonID,
 		Meta: map[string]any{
-			"anon_user_id":    anonID.String(),
-			"claimed_by":      claimedByID.String(),
+			"anon_user_id": anonID.String(),
+			"claimed_by":   claimedByID.String(),
 		},
 	})
 	return nil
@@ -313,6 +320,11 @@ func (s *Service) GeneratePasswordResetToken(ctx context.Context, email string, 
 
 	if err := store.StoreReset(ctx, h, u.ID, time.Hour); err != nil {
 		return "", fmt.Errorf("store reset token: %w", err)
+	}
+
+	// Best-effort: email the reset link. Never fail the request on email error.
+	if s.mailer != nil && u.Email != nil {
+		_ = s.mailer.PasswordReset(ctx, *u.Email, u.DisplayName, rawToken)
 	}
 	return rawToken, nil
 }

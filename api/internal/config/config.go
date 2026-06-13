@@ -24,6 +24,11 @@ type Config struct {
 	GoogleClientSecret string
 
 	FrontendURL string
+
+	// EmailFrom is the verified SES sender address, e.g.
+	// `SplitLedger <no-reply@example.com>`. When empty, emails are logged
+	// instead of sent (local dev — no AWS credentials required).
+	EmailFrom string
 }
 
 func Load() (*Config, error) {
@@ -40,6 +45,7 @@ func Load() (*Config, error) {
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		FrontendURL:        getenv("FRONTEND_URL", "http://localhost:3000"),
+		EmailFrom:          os.Getenv("EMAIL_FROM"),
 	}
 
 	if err := c.validate(); err != nil {

@@ -25,9 +25,9 @@ func hashFor(raw string) string {
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
 type fakeTeamRepo struct {
-	teams   map[uuid.UUID]*team.Team
-	members map[uuid.UUID]*team.TeamMember // keyed by member ID
-	links   map[uuid.UUID]*team.InviteLink
+	teams      map[uuid.UUID]*team.Team
+	members    map[uuid.UUID]*team.TeamMember // keyed by member ID
+	links      map[uuid.UUID]*team.InviteLink
 	linkByHash map[string]*team.InviteLink
 
 	createErr error
@@ -186,9 +186,12 @@ func (r *fakeTeamRepo) IncrementInviteLinkUse(_ context.Context, linkID uuid.UUI
 // fakeUserRepo is a minimal user.Repository — only FindByEmail is exercised by team.Service.
 type fakeUserRepo struct {
 	byEmail map[string]*user.User
+	byID    map[uuid.UUID]*user.User
 }
 
-func newFakeUserRepo() *fakeUserRepo { return &fakeUserRepo{byEmail: make(map[string]*user.User)} }
+func newFakeUserRepo() *fakeUserRepo {
+	return &fakeUserRepo{byEmail: make(map[string]*user.User), byID: make(map[uuid.UUID]*user.User)}
+}
 
 func (r *fakeUserRepo) FindByEmail(_ context.Context, email string) (*user.User, error) {
 	if u, ok := r.byEmail[email]; ok {
@@ -197,11 +200,16 @@ func (r *fakeUserRepo) FindByEmail(_ context.Context, email string) (*user.User,
 	return nil, user.ErrNotFound
 }
 
-func (r *fakeUserRepo) Create(context.Context, *user.User) (*user.User, error) { return nil, user.ErrNotFound }
+func (r *fakeUserRepo) Create(context.Context, *user.User) (*user.User, error) {
+	return nil, user.ErrNotFound
+}
 func (r *fakeUserRepo) CreateAnonymous(context.Context, string, uuid.UUID) (*user.User, error) {
 	return nil, user.ErrNotFound
 }
-func (r *fakeUserRepo) FindByID(context.Context, uuid.UUID) (*user.User, error) {
+func (r *fakeUserRepo) FindByID(_ context.Context, id uuid.UUID) (*user.User, error) {
+	if u, ok := r.byID[id]; ok {
+		return u, nil
+	}
 	return nil, user.ErrNotFound
 }
 func (r *fakeUserRepo) FindByOAuth(context.Context, string, string) (*user.User, error) {
@@ -210,7 +218,7 @@ func (r *fakeUserRepo) FindByOAuth(context.Context, string, string) (*user.User,
 func (r *fakeUserRepo) UpsertOAuthAccount(context.Context, uuid.UUID, string, string, *string) error {
 	return nil
 }
-func (r *fakeUserRepo) Update(context.Context, *user.User) (*user.User, error) { return nil, nil }
+func (r *fakeUserRepo) Update(context.Context, *user.User) (*user.User, error)   { return nil, nil }
 func (r *fakeUserRepo) UpdateAvatarURL(context.Context, uuid.UUID, string) error { return nil }
 func (r *fakeUserRepo) UpdatePassword(context.Context, uuid.UUID, string) error  { return nil }
 func (r *fakeUserRepo) GetNotificationPrefs(context.Context, uuid.UUID) (*user.NotificationPrefs, error) {
@@ -226,8 +234,46 @@ func (r *fakeUserRepo) Claim(context.Context, string, uuid.UUID) (uuid.UUID, err
 	return uuid.Nil, nil
 }
 
+// recordMailer records team email calls for assertions.
+type recordMailer struct {
+	invites     []mailCall
+	approved    []mailCall
+	rejected    []mailCall
+	inviteLinks []mailCall
+}
+
+type mailCall struct {
+	to       string
+	teamName string
+	extra    string // inviter name (invite) or raw token (invite link)
+}
+
+func (m *recordMailer) TeamInvite(_ context.Context, to, _, teamName, inviterName string) error {
+	m.invites = append(m.invites, mailCall{to: to, teamName: teamName, extra: inviterName})
+	return nil
+}
+
+func (m *recordMailer) JoinApproved(_ context.Context, to, _, teamName string) error {
+	m.approved = append(m.approved, mailCall{to: to, teamName: teamName})
+	return nil
+}
+
+func (m *recordMailer) JoinRejected(_ context.Context, to, _, teamName string) error {
+	m.rejected = append(m.rejected, mailCall{to: to, teamName: teamName})
+	return nil
+}
+
+func (m *recordMailer) InviteLink(_ context.Context, to, teamName, rawToken string) error {
+	m.inviteLinks = append(m.inviteLinks, mailCall{to: to, teamName: teamName, extra: rawToken})
+	return nil
+}
+
+func newSvcWithMailer(repo team.Repository, userRepo user.Repository, mailer team.Mailer) *team.Service {
+	return team.NewService(repo, userRepo, audit.NopLogger(), mailer)
+}
+
 func newSvc(repo team.Repository, userRepo user.Repository) *team.Service {
-	return team.NewService(repo, userRepo, audit.NopLogger())
+	return team.NewService(repo, userRepo, audit.NopLogger(), nil)
 }
 
 // addMember directly seeds a membership of the given role/status.
@@ -421,6 +467,126 @@ func TestInviteMember_PlainMember_InsufficientRole(t *testing.T) {
 	_, err := newSvc(repo, newFakeUserRepo()).InviteMember(context.Background(), tm.ID, member, "x@x.com")
 	if !errors.Is(err, team.ErrInsufficientRole) {
 		t.Fatalf("want ErrInsufficientRole, got %v", err)
+	}
+}
+
+func TestInviteMember_KnownEmail_SendsInviteEmail(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+
+	users := newFakeUserRepo()
+	email := "invitee@x.com"
+	invitee := &user.User{ID: uuid.New(), DisplayName: "Inv", Email: &email}
+	users.byEmail[email] = invitee
+	users.byID[owner] = &user.User{ID: owner, DisplayName: "Owner Olive"}
+
+	mailer := &recordMailer{}
+	_, err := newSvcWithMailer(repo, users, mailer).InviteMember(context.Background(), tm.ID, owner, "Invitee@X.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.invites) != 1 {
+		t.Fatalf("want 1 invite email, got %d", len(mailer.invites))
+	}
+	got := mailer.invites[0]
+	if got.to != email || got.teamName != tm.Name || got.extra != "Owner Olive" {
+		t.Errorf("invite email = %+v, want to=%s team=%s inviter=Owner Olive", got, email, tm.Name)
+	}
+}
+
+func TestApproveJoin_SendsApprovedEmail(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, true)
+	joiner := uuid.New()
+	req := addMember(repo, tm.ID, joiner, team.RoleMember, team.StatusRequested)
+
+	users := newFakeUserRepo()
+	email := "joiner@x.com"
+	users.byID[joiner] = &user.User{ID: joiner, DisplayName: "Joe", Email: &email}
+
+	mailer := &recordMailer{}
+	if _, err := newSvcWithMailer(repo, users, mailer).ApproveJoin(context.Background(), tm.ID, req.ID, owner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.approved) != 1 || mailer.approved[0].to != email {
+		t.Fatalf("want 1 approved email to %s, got %+v", email, mailer.approved)
+	}
+	if len(mailer.rejected) != 0 {
+		t.Error("did not expect a rejected email")
+	}
+}
+
+func TestRejectJoin_SendsRejectedEmail(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, true)
+	joiner := uuid.New()
+	req := addMember(repo, tm.ID, joiner, team.RoleMember, team.StatusRequested)
+
+	users := newFakeUserRepo()
+	email := "joiner@x.com"
+	users.byID[joiner] = &user.User{ID: joiner, DisplayName: "Joe", Email: &email}
+
+	mailer := &recordMailer{}
+	if _, err := newSvcWithMailer(repo, users, mailer).RejectJoin(context.Background(), tm.ID, req.ID, owner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.rejected) != 1 || mailer.rejected[0].to != email {
+		t.Fatalf("want 1 rejected email to %s, got %+v", email, mailer.rejected)
+	}
+}
+
+func TestApproveJoin_AnonymousRequester_NoEmail(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, true)
+	joiner := uuid.New() // not seeded in users.byID → no email on file
+	req := addMember(repo, tm.ID, joiner, team.RoleMember, team.StatusRequested)
+
+	mailer := &recordMailer{}
+	if _, err := newSvcWithMailer(repo, newFakeUserRepo(), mailer).ApproveJoin(context.Background(), tm.ID, req.ID, owner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.approved) != 0 {
+		t.Errorf("no email expected when requester has no email, got %+v", mailer.approved)
+	}
+}
+
+func TestCreateInviteLink_WithEmail_SendsInviteLinkEmail(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+
+	mailer := &recordMailer{}
+	to := "friend@x.com"
+	_, raw, err := newSvcWithMailer(repo, newFakeUserRepo(), mailer).
+		CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, &to)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.inviteLinks) != 1 {
+		t.Fatalf("want 1 invite-link email, got %d", len(mailer.inviteLinks))
+	}
+	got := mailer.inviteLinks[0]
+	if got.to != to || got.teamName != tm.Name || got.extra != raw {
+		t.Errorf("invite-link email = %+v, want to=%s team=%s token=%s", got, to, tm.Name, raw)
+	}
+}
+
+func TestCreateInviteLink_NoEmail_NoEmailSent(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+
+	mailer := &recordMailer{}
+	if _, _, err := newSvcWithMailer(repo, newFakeUserRepo(), mailer).
+		CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mailer.inviteLinks) != 0 {
+		t.Errorf("no email expected when email is nil, got %+v", mailer.inviteLinks)
 	}
 }
 
@@ -621,7 +787,7 @@ func TestCreateInviteLink_Admin_ReturnsRawToken(t *testing.T) {
 	tm := seedTeam(repo, owner, false)
 
 	maxUses := 5
-	link, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, &maxUses, nil)
+	link, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, &maxUses, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -639,7 +805,7 @@ func TestCreateInviteLink_PlainMember_InsufficientRole(t *testing.T) {
 	member := uuid.New()
 	addMember(repo, tm.ID, member, team.RoleMember, team.StatusActive)
 
-	_, _, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, member, nil, nil)
+	_, _, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, member, nil, nil, nil)
 	if !errors.Is(err, team.ErrInsufficientRole) {
 		t.Fatalf("want ErrInsufficientRole, got %v", err)
 	}
@@ -649,7 +815,7 @@ func TestJoinViaInviteLink_Valid_AddsActiveMemberAndIncrements(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
-	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil)
+	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create link: %v", err)
 	}
@@ -674,7 +840,7 @@ func TestJoinViaInviteLink_Revoked_Invalid(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
-	link, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil)
+	link, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create link: %v", err)
 	}
@@ -691,7 +857,7 @@ func TestJoinViaInviteLink_Exhausted_Invalid(t *testing.T) {
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
 	maxUses := 1
-	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, &maxUses, nil)
+	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, &maxUses, nil, nil)
 	if err != nil {
 		t.Fatalf("create link: %v", err)
 	}
@@ -727,7 +893,7 @@ func TestJoinViaInviteLink_AlreadyActive_AlreadyMember(t *testing.T) {
 	repo := newFakeRepo()
 	owner := uuid.New()
 	tm := seedTeam(repo, owner, false)
-	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil)
+	_, raw, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create link: %v", err)
 	}

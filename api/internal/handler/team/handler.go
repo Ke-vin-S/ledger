@@ -338,25 +338,26 @@ func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		MaxUses        *int `json:"max_uses"`
-		ExpiresInHours *int `json:"expires_in_hours"`
+		MaxUses        *int    `json:"max_uses"`
+		ExpiresInHours *int    `json:"expires_in_hours"`
+		Email          *string `json:"email"`
 	}
 	if !handler.Decode(w, r, &body) {
 		return
 	}
-	link, rawToken, err := h.teams.CreateInviteLink(r.Context(), teamID, uid, body.MaxUses, body.ExpiresInHours)
+	link, rawToken, err := h.teams.CreateInviteLink(r.Context(), teamID, uid, body.MaxUses, body.ExpiresInHours, body.Email)
 	if err != nil {
 		h.handleError(w, r, err)
 		return
 	}
 	inviteURL := h.frontendURL + "/invite/" + rawToken
 	handler.JSON(w, r, http.StatusCreated, inviteLinkResponse{
-		ID:         link.ID,
-		InviteURL:  inviteURL,
-		MaxUses:    link.MaxUses,
-		UseCount:   link.UseCount,
-		ExpiresAt:  link.ExpiresAt,
-		CreatedAt:  link.CreatedAt,
+		ID:        link.ID,
+		InviteURL: inviteURL,
+		MaxUses:   link.MaxUses,
+		UseCount:  link.UseCount,
+		ExpiresAt: link.ExpiresAt,
+		CreatedAt: link.CreatedAt,
 	})
 }
 
@@ -407,13 +408,13 @@ func (h *Handler) RevokeInviteLink(w http.ResponseWriter, r *http.Request) {
 // ── Response DTOs ─────────────────────────────────────────────────────────────
 
 type teamResponse struct {
-	ID          uuid.UUID  `json:"id"`
-	Name        string     `json:"name"`
-	Description *string    `json:"description,omitempty"`
-	Currency    string     `json:"currency"`
-	IsPublic    bool       `json:"is_public"`
-	OwnerID     uuid.UUID  `json:"owner_id"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	Currency    string    `json:"currency"`
+	IsPublic    bool      `json:"is_public"`
+	OwnerID     uuid.UUID `json:"owner_id"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type memberResponse struct {

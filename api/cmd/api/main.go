@@ -18,25 +18,26 @@ import (
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
-	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
+	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/config"
 	"github.com/Ke-vin-S/ledger/api/internal/db"
-	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/auditlog"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	domainflag "github.com/Ke-vin-S/ledger/api/internal/domain/flag"
 	domainloan "github.com/Ke-vin-S/ledger/api/internal/domain/loan"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/notification"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
+	"github.com/Ke-vin-S/ledger/api/internal/email"
+	"github.com/Ke-vin-S/ledger/api/internal/graph"
+	auditloghandler "github.com/Ke-vin-S/ledger/api/internal/handler/auditlog"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
 	flaghandler "github.com/Ke-vin-S/ledger/api/internal/handler/flag"
-	auditloghandler "github.com/Ke-vin-S/ledger/api/internal/handler/auditlog"
 	loanhandler "github.com/Ke-vin-S/ledger/api/internal/handler/loan"
 	notificationhandler "github.com/Ke-vin-S/ledger/api/internal/handler/notification"
-	"github.com/Ke-vin-S/ledger/api/internal/graph"
 	settlementhandler "github.com/Ke-vin-S/ledger/api/internal/handler/settlement"
 	teamhandler "github.com/Ke-vin-S/ledger/api/internal/handler/team"
 	userhandler "github.com/Ke-vin-S/ledger/api/internal/handler/user"
@@ -130,9 +131,23 @@ func run() error {
 		return fmt.Errorf("init s3 presigner: %w", err)
 	}
 
+	// Email — SES in production; a logging sender locally when EMAIL_FROM is unset.
+	var emailSender email.Sender
+	if cfg.EmailFrom != "" {
+		emailSender, err = email.NewSESSender(ctx, cfg.AWSRegion)
+		if err != nil {
+			return fmt.Errorf("init ses sender: %w", err)
+		}
+		log.Info("email: using SES sender", zap.String("from", cfg.EmailFrom))
+	} else {
+		emailSender = email.NewLogSender(log)
+		log.Info("email: EMAIL_FROM unset — using log sender (emails not sent)")
+	}
+	mailer := email.NewMailer(emailSender, cfg.EmailFrom, cfg.FrontendURL)
+
 	// Domain services
-	userSvc := user.NewService(userRepo, auditor)
-	teamSvc := team.NewService(teamRepo, userRepo, auditor)
+	userSvc := user.NewService(userRepo, auditor, mailer)
+	teamSvc := team.NewService(teamRepo, userRepo, auditor, mailer)
 	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
 	settlementSvc := settlement.NewService(settlementRepo, auditor)
 	flagSvc := domainflag.NewService(flagRepo, auditor)

@@ -74,7 +74,7 @@ func (r *fakeUserRepo) Claim(context.Context, string, uuid.UUID) (uuid.UUID, err
 }
 
 func router(repo user.Repository, actor uuid.UUID) http.Handler {
-	svc := user.NewService(repo, audit.NopLogger())
+	svc := user.NewService(repo, audit.NopLogger(), nil)
 	h := New(svc, "https://app.example.com")
 	root := chi.NewRouter()
 	root.Mount("/users", h.Routes(authAs(actor)))
