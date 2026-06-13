@@ -7,6 +7,8 @@ import (
 	"html/template"
 	"net/url"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // Mailer renders and sends the application's transactional emails. It owns the
@@ -18,15 +20,22 @@ type Mailer struct {
 	sender      Sender
 	from        string
 	frontendURL string
+	log         *zap.Logger
 }
 
 // NewMailer constructs a Mailer. `from` is the verified SES sender address
 // (e.g. `SplitLedger <no-reply@example.com>`); `frontendURL` is the web app base.
-func NewMailer(sender Sender, from, frontendURL string) *Mailer {
+// `log` surfaces send failures — callers swallow the returned error (emails are
+// best-effort), so this is the only place a failed send becomes visible.
+func NewMailer(sender Sender, from, frontendURL string, log *zap.Logger) *Mailer {
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &Mailer{
 		sender:      sender,
 		from:        from,
 		frontendURL: strings.TrimRight(frontendURL, "/"),
+		log:         log,
 	}
 }
 
@@ -108,8 +117,23 @@ func (m *Mailer) InviteLink(ctx context.Context, to, teamName, rawToken string) 
 		})
 }
 
-// send renders the HTML + text bodies and dispatches through the sender.
+// send renders the HTML + text bodies and dispatches through the sender. Any
+// failure is logged here at warn level — callers treat email as best-effort and
+// discard the returned error, so this log is the only signal a send failed.
 func (m *Mailer) send(ctx context.Context, to, subject string, c emailContent) error {
+	err := m.dispatch(ctx, to, subject, c)
+	if err != nil {
+		m.log.Warn("email send failed",
+			zap.String("to", to),
+			zap.String("from", m.from),
+			zap.String("subject", subject),
+			zap.Error(err),
+		)
+	}
+	return err
+}
+
+func (m *Mailer) dispatch(ctx context.Context, to, subject string, c emailContent) error {
 	if to == "" {
 		return fmt.Errorf("email: empty recipient")
 	}

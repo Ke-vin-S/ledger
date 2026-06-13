@@ -143,7 +143,7 @@ func run() error {
 		emailSender = email.NewLogSender(log)
 		log.Info("email: EMAIL_FROM unset — using log sender (emails not sent)")
 	}
-	mailer := email.NewMailer(emailSender, cfg.EmailFrom, cfg.FrontendURL)
+	mailer := email.NewMailer(emailSender, cfg.EmailFrom, cfg.FrontendURL, log)
 
 	// Domain services
 	userSvc := user.NewService(userRepo, auditor, mailer)
