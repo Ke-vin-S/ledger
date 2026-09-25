@@ -84,7 +84,7 @@ func (r *expenseRepo) FindSplitsByExpenseID(ctx context.Context, expenseID uuid.
 		SELECT id, expense_id, user_id, share_amount, share_units, version, created_at
 		FROM expense_splits
 		WHERE expense_id = $1 AND version = $2
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 	`, expenseID, version)
 	if err != nil {
 		return nil, err
@@ -143,7 +143,7 @@ func (r *expenseRepo) ListForUser(ctx context.Context, userID uuid.UUID, include
 
 // ── SaveCorrection ────────────────────────────────────────────────────────────
 
-func (r *expenseRepo) SaveCorrection(ctx context.Context, expenseID uuid.UUID, snapshot any, newExpense *expense.Expense, newSplits []expense.ExpenseSplit) (*expense.Expense, []expense.ExpenseSplit, error) {
+func (r *expenseRepo) SaveCorrection(ctx context.Context, expenseID uuid.UUID, snapshot any, newExpense *expense.Expense, newSplits []expense.ExpenseSplit, correctedBy uuid.UUID, correctionReason *string) (*expense.Expense, []expense.ExpenseSplit, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin tx: %w", err)
@@ -156,35 +156,49 @@ func (r *expenseRepo) SaveCorrection(ctx context.Context, expenseID uuid.UUID, s
 	}
 
 	prevVersion := newExpense.Version - 1
-	_, err = tx.Exec(ctx, `
-		INSERT INTO expense_versions (expense_id, version, snapshot, corrected_by, correction_reason)
-		VALUES ($1, $2, $3, $4, $5)
-	`, expenseID, prevVersion, snapshotJSON, newExpense.CreatedBy, newExpense.Note)
-	if err != nil {
-		return nil, nil, fmt.Errorf("insert version snapshot: %w", err)
-	}
-
 	row := tx.QueryRow(ctx, `
 		UPDATE expenses
 		SET title=$1, amount=$2, currency=$3, category_id=$4, paid_by=$5,
 		    expense_date=$6, split_method=$7, receipt_url=$8, note=$9, version=$10
-		WHERE id=$11
+		WHERE id=$11 AND version=$12
 		RETURNING id, scope, team_id, title, amount, currency, category_id, paid_by,
 		          expense_date, split_method, receipt_url, note, version,
 		          is_void, void_reason, voided_by, voided_at, created_by, created_at
 	`, newExpense.Title, newExpense.Amount, newExpense.Currency, newExpense.CategoryID,
 		newExpense.PaidBy, newExpense.ExpenseDate.Format("2006-01-02"),
 		newExpense.SplitMethod, newExpense.ReceiptURL, newExpense.Note,
-		newExpense.Version, expenseID)
+		newExpense.Version, expenseID, prevVersion)
 
 	saved, err := scanExpense(row)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, expense.ErrVersionConflict
+		}
 		return nil, nil, fmt.Errorf("update expense: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO expense_versions (expense_id, version, snapshot, corrected_by, correction_reason)
+		VALUES ($1, $2, $3, $4, $5)
+	`, expenseID, prevVersion, snapshotJSON, correctedBy, correctionReason); err != nil {
+		return nil, nil, fmt.Errorf("insert version snapshot: %w", err)
 	}
 
 	savedSplits, err := insertSplits(ctx, tx, expenseID, newSplits)
 	if err != nil {
 		return nil, nil, err
+	}
+	recipients := make([]uuid.UUID, 0, len(savedSplits)+1)
+	recipients = append(recipients, newExpense.PaidBy)
+	for _, split := range savedSplits {
+		recipients = append(recipients, split.UserID)
+	}
+	if err := createTx(ctx, tx, recipients, "expense.corrected", "expense", expenseID, map[string]any{
+		"title":   newExpense.Title,
+		"amount":  newExpense.Amount,
+		"version": newExpense.Version,
+	}); err != nil {
+		return nil, nil, fmt.Errorf("notify expense participants: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -237,6 +251,35 @@ func insertSplits(ctx context.Context, tx pgx.Tx, expenseID uuid.UUID, splits []
 		out = append(out, created)
 	}
 	return out, nil
+}
+
+func expenseParticipantIDs(ctx context.Context, tx pgx.Tx, expenseID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT participant_id
+		FROM (
+			SELECT paid_by AS participant_id
+			FROM expenses
+			WHERE id = $1
+			UNION
+			SELECT user_id
+			FROM expense_splits es
+			JOIN expenses e ON e.id = es.expense_id AND e.version = es.version
+			WHERE es.expense_id = $1
+		) participants
+	`, expenseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func scanExpense(row pgx.Row) (*expense.Expense, error) {
