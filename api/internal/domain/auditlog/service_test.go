@@ -2,12 +2,14 @@ package auditlog_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Ke-vin-S/ledger/api/internal/domain/auditlog"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 )
 
 // ── fake ──────────────────────────────────────────────────────────────────────
@@ -15,6 +17,14 @@ import (
 type fakeRepo struct {
 	teamEntries  []*auditlog.LogEntry
 	actorEntries []*auditlog.LogEntry
+}
+
+type fakeMemberships struct {
+	err error
+}
+
+func (m *fakeMemberships) RequireMembership(context.Context, uuid.UUID, uuid.UUID, string) error {
+	return m.err
 }
 
 func (r *fakeRepo) ListByTeam(_ context.Context, _ uuid.UUID, p auditlog.ListParams) ([]*auditlog.LogEntry, error) {
@@ -48,7 +58,7 @@ func (r *fakeRepo) ListByActor(_ context.Context, _ uuid.UUID, p auditlog.ListPa
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(repo auditlog.Repository) *auditlog.Service {
-	return auditlog.NewService(repo)
+	return auditlog.NewService(repo, &fakeMemberships{})
 }
 
 func makeEntries(n int, action string) []*auditlog.LogEntry {
@@ -71,7 +81,7 @@ func TestService_ListTeamEntries_ReturnsItems(t *testing.T) {
 	repo := &fakeRepo{teamEntries: makeEntries(3, "expense.created")}
 	svc := newSvc(repo)
 
-	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), auditlog.ListParams{Limit: 20})
+	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{Limit: 20})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +97,7 @@ func TestService_ListTeamEntries_HasMore_WhenExceedsLimit(t *testing.T) {
 	repo := &fakeRepo{teamEntries: makeEntries(21, "expense.created")}
 	svc := newSvc(repo)
 
-	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), auditlog.ListParams{Limit: 20})
+	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{Limit: 20})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +117,7 @@ func TestService_ListTeamEntries_ActionFilter_OnlyMatchingReturned(t *testing.T)
 	repo := &fakeRepo{teamEntries: entries}
 	svc := newSvc(repo)
 
-	items, _, err := svc.ListTeamEntries(context.Background(), uuid.New(), auditlog.ListParams{
+	items, _, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{
 		Limit:  20,
 		Action: "expense.created",
 	})
@@ -122,7 +132,7 @@ func TestService_ListTeamEntries_ActionFilter_OnlyMatchingReturned(t *testing.T)
 func TestService_ListTeamEntries_Empty_ReturnsEmptySlice(t *testing.T) {
 	svc := newSvc(&fakeRepo{})
 
-	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), auditlog.ListParams{Limit: 20})
+	items, hasMore, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{Limit: 20})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,12 +149,22 @@ func TestService_ListTeamEntries_DefaultLimit_AppliedWhenZero(t *testing.T) {
 	svc := newSvc(repo)
 
 	// Limit=0 should use the default (20), not break
-	items, _, err := svc.ListTeamEntries(context.Background(), uuid.New(), auditlog.ListParams{Limit: 0})
+	items, _, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{Limit: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(items) != 5 {
 		t.Errorf("want 5 items with default limit, got %d", len(items))
+	}
+}
+
+func TestService_ListTeamEntries_MembershipRequired(t *testing.T) {
+	repo := &fakeRepo{teamEntries: makeEntries(1, "expense.created")}
+	svc := auditlog.NewService(repo, &fakeMemberships{err: team.ErrNotMember})
+
+	_, _, err := svc.ListTeamEntries(context.Background(), uuid.New(), uuid.New(), auditlog.ListParams{Limit: 20})
+	if !errors.Is(err, team.ErrNotMember) {
+		t.Fatalf("want ErrNotMember, got %v", err)
 	}
 }
 

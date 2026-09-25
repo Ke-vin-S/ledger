@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
+	chiadapter "github.com/awslabs/aws-lambda-go-api-proxy/chi"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -17,6 +19,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/extension"
+	"github.com/99designs/gqlgen/graphql/handler/lru"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
@@ -32,6 +37,7 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	"github.com/Ke-vin-S/ledger/api/internal/email"
 	"github.com/Ke-vin-S/ledger/api/internal/graph"
+	apihandler "github.com/Ke-vin-S/ledger/api/internal/handler"
 	auditloghandler "github.com/Ke-vin-S/ledger/api/internal/handler/auditlog"
 	authhandler "github.com/Ke-vin-S/ledger/api/internal/handler/auth"
 	expensehandler "github.com/Ke-vin-S/ledger/api/internal/handler/expense"
@@ -45,12 +51,13 @@ import (
 	"github.com/Ke-vin-S/ledger/api/internal/middleware"
 	"github.com/Ke-vin-S/ledger/api/internal/repository"
 	"github.com/Ke-vin-S/ledger/api/internal/storage"
+	"github.com/vektah/gqlparser/v2/ast"
 )
 
-// teamGateway adapts team.Repository to expense.TeamGateway.
+// teamGatewayAdapter exposes the shared membership read model to domain services.
 type teamGatewayAdapter struct{ repo team.Repository }
 
-func teamGateway(repo team.Repository) expense.TeamGateway {
+func teamGateway(repo team.Repository) *teamGatewayAdapter {
 	return &teamGatewayAdapter{repo: repo}
 }
 
@@ -60,6 +67,17 @@ func (a *teamGatewayAdapter) GetMembership(ctx context.Context, teamID, userID u
 		return "", "", err
 	}
 	return m.Role, m.Status, nil
+}
+
+type expenseAccessAdapter struct{ svc *expense.Service }
+
+func (a *expenseAccessAdapter) CanRead(ctx context.Context, actorID, expenseID uuid.UUID) error {
+	_, err := a.svc.GetExpense(ctx, actorID, expenseID)
+	return err
+}
+
+func (a *expenseAccessAdapter) CanWrite(ctx context.Context, actorID, expenseID uuid.UUID) error {
+	return a.svc.CanWrite(ctx, actorID, expenseID)
 }
 
 func main() {
@@ -73,6 +91,12 @@ func main() {
 func run() error {
 	_ = godotenv.Load()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := config.LoadLambdaSecrets(ctx); err != nil {
+		return fmt.Errorf("load Lambda secrets: %w", err)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -80,9 +104,6 @@ func run() error {
 
 	log := logger.Init(cfg.Env, cfg.LogLevel)
 	defer log.Sync() //nolint:errcheck
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -148,16 +169,32 @@ func run() error {
 	// Domain services
 	userSvc := user.NewService(userRepo, auditor, mailer)
 	teamSvc := team.NewService(teamRepo, userRepo, auditor, mailer)
-	expenseSvc := expense.NewService(expenseRepo, teamGateway(teamRepo), auditor, presigner)
-	settlementSvc := settlement.NewService(settlementRepo, auditor)
-	flagSvc := domainflag.NewService(flagRepo, auditor)
+	teamGW := teamGateway(teamRepo)
+	expenseSvc := expense.NewService(expenseRepo, teamGW, auditor, presigner)
+	settlementSvc := settlement.NewService(settlementRepo, teamGW, auditor)
+	flagSvc := domainflag.NewService(flagRepo, &expenseAccessAdapter{svc: expenseSvc}, auditor)
 	loanSvc := domainloan.NewService(loanRepo, auditor)
 	notificationSvc := notification.NewService(notificationRepo)
-	auditLogSvc := auditlog.NewService(auditLogRepo)
-	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore)
+	auditLogSvc := auditlog.NewService(auditLogRepo, teamSvc)
+	gqlResolver := graph.NewResolver(activityStore, dashStore, historyStore, teamSvc, expenseSvc)
+
+	credentialLimiter := middleware.RateLimit(rdb, 10, time.Minute, middleware.IPAndCredentialKey)
+	refreshLimiter := middleware.RateLimit(rdb, 60, time.Minute, middleware.IPKey)
+	authenticatedLimiter := middleware.RateLimit(rdb, 200, time.Minute, func(r *http.Request) string {
+		claims := jwtauth.ClaimsFrom(r.Context())
+		if claims == nil {
+			return "anonymous"
+		}
+		return claims.Subject
+	})
+	baseAuthMW := authMW
+	limitedAuthMW := func(next http.Handler) http.Handler {
+		return baseAuthMW(authenticatedLimiter(next))
+	}
+	authMW = limitedAuthMW
 
 	// Handlers
-	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID, cfg.GoogleClientSecret)
+	authH := authhandler.New(userSvc, jwtSvc, tokenStore, resetStore, cfg.IsLocal(), cfg.GoogleClientID, cfg.GoogleClientSecret, credentialLimiter, refreshLimiter)
 	userH := userhandler.New(userSvc, cfg.FrontendURL)
 	teamH := teamhandler.New(teamSvc, cfg.FrontendURL)
 	expenseH := expensehandler.New(expenseSvc, cfg.FrontendURL)
@@ -174,11 +211,33 @@ func run() error {
 	}
 
 	r := chi.NewRouter()
+	r.Use(middleware.SecurityHeaders(cfg.IsLocal()))
 	r.Use(middleware.CORS(corsOrigins))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RequestLogger(log))
 	r.Use(chimiddleware.Recoverer)
 
+	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		checks := map[string]string{"database": "ok", "redis": "ok"}
+		ready := true
+		if err := pool.Ping(ctx); err != nil {
+			checks["database"] = "unavailable"
+			ready = false
+		}
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			checks["redis"] = "unavailable"
+			ready = false
+		}
+		status := http.StatusOK
+		state := "ready"
+		if !ready {
+			status = http.StatusServiceUnavailable
+			state = "not_ready"
+		}
+		apihandler.JSON(w, r, status, map[string]any{"status": state, "checks": checks})
+	})
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -225,19 +284,32 @@ func run() error {
 	})
 	r.Mount("/v1/audit", auditLogH.MyRoutes(authMW))
 
-	// GraphQL — read-only, auth-guarded
-	gqlSrv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: gqlResolver}))
+	gqlSrv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: gqlResolver}))
+	gqlSrv.AddTransport(transport.Options{})
+	gqlSrv.AddTransport(transport.GET{})
+	gqlSrv.AddTransport(transport.POST{})
+	gqlSrv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
+	gqlSrv.Use(extension.FixedComplexityLimit(200))
+	if cfg.IsLocal() {
+		gqlSrv.Use(extension.Introspection{})
+	}
 	r.With(authMW).Handle("/graphql", gqlSrv)
 	if cfg.IsLocal() {
 		r.Handle("/playground", playground.Handler("GraphQL", "/graphql"))
 	}
 
+	if os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != "" || os.Getenv("AWS_EXECUTION_ENV") != "" {
+		lambda.Start(chiadapter.NewV2(r).ProxyWithContextV2)
+		return nil
+	}
+
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 )
 
@@ -12,6 +14,14 @@ func Decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body: "+err.Error())
+		return false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = errors.New("request body must contain exactly one JSON value")
+		}
 		Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body: "+err.Error())
 		return false
 	}

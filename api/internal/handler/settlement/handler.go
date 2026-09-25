@@ -1,7 +1,6 @@
 package settlement
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
+	"github.com/Ke-vin-S/ledger/api/internal/handler"
 )
 
 type Handler struct {
@@ -105,8 +105,7 @@ func (h *Handler) recordSettlement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body recordBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondErr(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+	if !handler.Decode(w, r, &body) {
 		return
 	}
 
@@ -139,15 +138,16 @@ func (h *Handler) recordSettlement(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, svcErr)
 		return
 	}
-	respondJSON(w, r, http.StatusCreated, map[string]any{"data": toSettlementResponse(result)})
+	handler.JSON(w, r, http.StatusCreated, toSettlementResponse(result))
 }
 
 func (h *Handler) listSettlements(w http.ResponseWriter, r *http.Request) {
+	actorID := jwtauth.MustUserID(r.Context())
 	expID, ok := parseUUID(w, r, chi.URLParam(r, "expenseId"))
 	if !ok {
 		return
 	}
-	results, err := h.svc.ListSettlementsByExpense(r.Context(), expID)
+	results, err := h.svc.ListSettlementsByExpense(r.Context(), actorID, expID)
 	if err != nil {
 		handleErr(w, r, err)
 		return
@@ -156,7 +156,7 @@ func (h *Handler) listSettlements(w http.ResponseWriter, r *http.Request) {
 	for _, s := range results {
 		items = append(items, toSettlementResponse(s))
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": items})
+	handler.JSON(w, r, http.StatusOK, items)
 }
 
 func (h *Handler) debtBalance(w http.ResponseWriter, r *http.Request) {
@@ -166,23 +166,22 @@ func (h *Handler) debtBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default debtor to caller; allow explicit override via query param.
-	debtorID := actorID
+	var requestedDebtorID *uuid.UUID
 	if raw := r.URL.Query().Get("debtor_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
 			respondErr(w, r, http.StatusBadRequest, "INVALID_INPUT", "invalid debtor_id", "debtor_id")
 			return
 		}
-		debtorID = id
+		requestedDebtorID = &id
 	}
 
-	bal, err := h.svc.GetDebtBalance(r.Context(), expID, debtorID)
+	bal, err := h.svc.GetDebtBalance(r.Context(), actorID, expID, requestedDebtorID)
 	if err != nil {
 		handleErr(w, r, err)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": bal})
+	handler.JSON(w, r, http.StatusOK, bal)
 }
 
 func (h *Handler) confirmSettlement(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +195,7 @@ func (h *Handler) confirmSettlement(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, err)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": toSettlementResponse(result)})
+	handler.JSON(w, r, http.StatusOK, toSettlementResponse(result))
 }
 
 func (h *Handler) disputeSettlement(w http.ResponseWriter, r *http.Request) {
@@ -207,8 +206,7 @@ func (h *Handler) disputeSettlement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body disputeBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondErr(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+	if !handler.Decode(w, r, &body) {
 		return
 	}
 
@@ -217,7 +215,7 @@ func (h *Handler) disputeSettlement(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, err)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": toSettlementResponse(result)})
+	handler.JSON(w, r, http.StatusOK, toSettlementResponse(result))
 }
 
 func (h *Handler) teamBalances(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +232,7 @@ func (h *Handler) teamBalances(w http.ResponseWriter, r *http.Request) {
 	if balances == nil {
 		balances = []*settlement.TeamBalance{}
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": balances})
+	handler.JSON(w, r, http.StatusOK, balances)
 }
 
 func (h *Handler) myBalances(w http.ResponseWriter, r *http.Request) {
@@ -247,7 +245,7 @@ func (h *Handler) myBalances(w http.ResponseWriter, r *http.Request) {
 	if balances == nil {
 		balances = []*settlement.UserBalance{}
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": balances})
+	handler.JSON(w, r, http.StatusOK, balances)
 }
 
 // ── mapping ───────────────────────────────────────────────────────────────────
@@ -289,6 +287,8 @@ func handleErr(w http.ResponseWriter, r *http.Request, err error) {
 		respondErr(w, r, http.StatusNotFound, "NO_DEBT", "no outstanding debt for this expense/debtor pair", "")
 	case errors.Is(err, settlement.ErrInvalidInput):
 		respondErr(w, r, http.StatusBadRequest, "INVALID_INPUT", err.Error(), "")
+	case errors.Is(err, settlement.ErrInvalidPayee):
+		respondErr(w, r, http.StatusUnprocessableEntity, "INVALID_PAYEE", err.Error(), "payee_id")
 	default:
 		respondErr(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", "")
 	}
@@ -305,14 +305,6 @@ func parseUUID(w http.ResponseWriter, r *http.Request, s string) (uuid.UUID, boo
 	return id, true
 }
 
-func respondJSON(w http.ResponseWriter, r *http.Request, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
 func respondErr(w http.ResponseWriter, r *http.Request, status int, code, message, field string) {
-	respondJSON(w, r, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message, "field": field},
-	})
+	handler.ErrorField(w, r, status, code, message, field)
 }

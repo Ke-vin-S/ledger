@@ -15,6 +15,7 @@ type Repository interface {
 
 	// CreateAnonymous inserts an anonymous user placeholder (no notification_prefs row).
 	CreateAnonymous(ctx context.Context, displayName string, createdBy uuid.UUID) (*User, error)
+	GetAnonymousOwner(ctx context.Context, anonUserID uuid.UUID) (createdBy uuid.UUID, err error)
 
 	// FindByID returns the user with the given ID. Returns ErrNotFound if absent.
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)

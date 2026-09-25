@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Expense, CreateExpenseInput } from "@/types/expense.types";
 import { API_ENDPOINTS } from "@/constants/api";
+import { invalidateExpenseGraph } from "@/lib/queryKeys";
 
 export type { Expense, CreateExpenseInput };
 
@@ -41,10 +42,8 @@ export function useCreateExpense(teamId: string) {
     mutationFn: (data: CreateExpenseInput) =>
       api.post<Expense>(API_ENDPOINTS.teams.expenses(teamId), data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "expenses"] });
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
-      qc.invalidateQueries({ queryKey: ["users", "me"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      invalidateExpenseGraph(qc, { teamId });
+      void qc.invalidateQueries({ queryKey: ["users", "me"] });
     },
   });
 }
@@ -60,10 +59,7 @@ export function useCorrectExpense(teamId: string) {
       data: Partial<CreateExpenseInput> & { correction_reason?: string };
     }) => api.patch<Expense>(API_ENDPOINTS.teams.expense(teamId, expenseId), data),
     onSuccess: (_, { expenseId }) => {
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "expenses"] });
-      qc.invalidateQueries({ queryKey: ["expenses", expenseId] });
-      qc.invalidateQueries({ queryKey: ["expenses", expenseId, "history"] });
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
+      invalidateExpenseGraph(qc, { teamId, expenseId });
     },
   });
 }
@@ -71,11 +67,10 @@ export function useCorrectExpense(teamId: string) {
 export function useVoidExpense(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ expenseId }: { expenseId: string; reason?: string }) =>
-      api.delete(API_ENDPOINTS.teams.expense(teamId, expenseId)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "expenses"] });
-      qc.invalidateQueries({ queryKey: ["teams", teamId, "balances"] });
+    mutationFn: ({ expenseId, reason }: { expenseId: string; reason: string }) =>
+      api.patch(API_ENDPOINTS.expenses.void(expenseId), { reason }),
+    onSuccess: (_, { expenseId }) => {
+      invalidateExpenseGraph(qc, { teamId, expenseId });
     },
   });
 }

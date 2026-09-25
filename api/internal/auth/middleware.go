@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Ke-vin-S/ledger/api/internal/middleware"
+	"github.com/Ke-vin-S/ledger/api/internal/handler"
 )
 
 // Middleware returns a Chi-compatible middleware that validates the JWT Bearer token.
@@ -36,24 +36,6 @@ func Middleware(jwt *JWTService, store *TokenStore) func(http.Handler) http.Hand
 	}
 }
 
-// Optional is like Middleware but continues even when no token is present.
-// Claims will be nil if unauthenticated.
-func Optional(jwt *JWTService, store *TokenStore) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if token, ok := bearerToken(r); ok {
-				if claims, err := jwt.Verify(token); err == nil {
-					revoked, _ := store.IsRevoked(r.Context(), claims.ID)
-					if !revoked {
-						r = r.WithContext(SetClaims(r.Context(), claims))
-					}
-				}
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 func bearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") {
@@ -67,10 +49,7 @@ func bearerToken(r *http.Request) (string, bool) {
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	reqID := middleware.GetRequestID(r.Context())
-	w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"missing or invalid access token"},"meta":{"request_id":"` + reqID + `"}}`))
+	handler.Error(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token")
 }
 
 // RequireAuth is a convenience middleware that blocks non-authenticated requests.
@@ -78,4 +57,3 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 func RequireAuth(jwt *JWTService, store *TokenStore) func(http.Handler) http.Handler {
 	return Middleware(jwt, store)
 }
-

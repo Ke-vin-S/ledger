@@ -22,6 +22,7 @@ type fakeUserRepo struct {
 	byOAuth    map[string]*user.User // key: provider|uid
 	claimTok   map[string]*user.ClaimToken
 	oauthLinks []string
+	anonOwners map[uuid.UUID]uuid.UUID
 
 	createErr   error
 	claimAnonID uuid.UUID
@@ -32,9 +33,10 @@ type fakeUserRepo struct {
 func newFakeRepo() *fakeUserRepo {
 	return &fakeUserRepo{
 		byID:        make(map[uuid.UUID]*user.User),
+		anonOwners:  make(map[uuid.UUID]uuid.UUID),
+		claimTok:    make(map[string]*user.ClaimToken),
 		byEmail:     make(map[string]*user.User),
 		byOAuth:     make(map[string]*user.User),
-		claimTok:    make(map[string]*user.ClaimToken),
 		passwordSet: make(map[uuid.UUID]string),
 	}
 }
@@ -63,9 +65,17 @@ func (r *fakeUserRepo) CreateAnonymous(_ context.Context, displayName string, cr
 		DisplayName:  displayName,
 		CreatedAt:    time.Now(),
 	}
-	_ = createdBy
 	r.byID[u.ID] = u
+	r.anonOwners[u.ID] = createdBy
 	return u, nil
+}
+
+func (r *fakeUserRepo) GetAnonymousOwner(_ context.Context, anonUserID uuid.UUID) (uuid.UUID, error) {
+	ownerID, ok := r.anonOwners[anonUserID]
+	if !ok {
+		return uuid.Nil, user.ErrNotFound
+	}
+	return ownerID, nil
 }
 
 func (r *fakeUserRepo) FindByID(_ context.Context, id uuid.UUID) (*user.User, error) {
@@ -182,6 +192,38 @@ func (m *recordMailer) PasswordReset(_ context.Context, to, userName, rawToken s
 	m.userName = userName
 	m.rawToken = rawToken
 	return nil
+}
+
+type recordingAuditor struct {
+	entries []audit.Entry
+}
+
+func (a *recordingAuditor) Log(_ context.Context, entry audit.Entry) error {
+	a.entries = append(a.entries, entry)
+	return nil
+}
+
+func TestRegister_AuditPayloadOmitsPasswordHash(t *testing.T) {
+	repo := newFakeRepo()
+	auditor := &recordingAuditor{}
+	svc := user.NewService(repo, auditor, nil)
+	created, err := svc.Register(context.Background(), "Kevin", "kevin@example.com", "supersecret")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if created.PasswordHash == nil {
+		t.Fatal("expected stored password hash")
+	}
+	if len(auditor.entries) != 1 {
+		t.Fatalf("audit entries = %d, want 1", len(auditor.entries))
+	}
+	entry, ok := auditor.entries[0].After.(user.AuditUser)
+	if !ok {
+		t.Fatalf("audit payload type = %T, want user.AuditUser", auditor.entries[0].After)
+	}
+	if entry.ID != created.ID || entry.DisplayName != created.DisplayName {
+		t.Fatalf("unexpected audit payload: %+v", entry)
+	}
 }
 
 // ── Register ───────────────────────────────────────────────────────────────────
@@ -398,10 +440,12 @@ func TestCreateAnonymous_Valid_Succeeds(t *testing.T) {
 
 func TestGenerateClaimToken_AnonUser_ReturnsRawToken(t *testing.T) {
 	repo := newFakeRepo()
+	claimer := uuid.New()
 	anon := &user.User{ID: uuid.New(), IdentityType: user.IdentityTypeAnonymous}
 	repo.byID[anon.ID] = anon
+	repo.anonOwners[anon.ID] = claimer
 
-	raw, expires, err := newSvc(repo).GenerateClaimToken(context.Background(), anon.ID, uuid.New())
+	raw, expires, err := newSvc(repo).GenerateClaimToken(context.Background(), anon.ID, claimer)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -427,13 +471,32 @@ func TestGenerateClaimToken_RegisteredUser_NotAnonymous(t *testing.T) {
 	}
 }
 
+func TestGenerateClaimToken_NonOwnerForbidden(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	anon, err := newSvc(repo).CreateAnonymous(context.Background(), "Guest", owner)
+	if err != nil {
+		t.Fatalf("create anonymous: %v", err)
+	}
+
+	_, _, err = newSvc(repo).GenerateClaimToken(context.Background(), anon.ID, uuid.New())
+	if !errors.Is(err, user.ErrNotAnonymousOwner) {
+		t.Fatalf("want ErrNotAnonymousOwner, got %v", err)
+	}
+	if len(repo.claimTok) != 0 {
+		t.Fatal("non-owner generated a claim token")
+	}
+}
+
 // ── ClaimAnonymous ─────────────────────────────────────────────────────────────
 
 func TestClaimAnonymous_ValidToken_Succeeds(t *testing.T) {
 	repo := newFakeRepo()
-	anon := &user.User{ID: uuid.New(), IdentityType: user.IdentityTypeAnonymous}
-	repo.byID[anon.ID] = anon
 	claimer := uuid.New()
+	anon, err := newSvc(repo).CreateAnonymous(context.Background(), "Guest", claimer)
+	if err != nil {
+		t.Fatalf("create anonymous: %v", err)
+	}
 
 	raw, _, err := newSvc(repo).GenerateClaimToken(context.Background(), anon.ID, claimer)
 	if err != nil {
@@ -530,7 +593,8 @@ func TestResetPassword_ValidToken_UpdatesPassword(t *testing.T) {
 	repo := newFakeRepo()
 	u := seedRegistered(t, repo, "reset@me.com", "oldpassword")
 	store := newResetStore()
-	svc := newSvc(repo)
+	auditor := &recordingAuditor{}
+	svc := user.NewService(repo, auditor, nil)
 
 	raw, err := svc.GeneratePasswordResetToken(context.Background(), "reset@me.com", store)
 	if err != nil {
@@ -549,6 +613,9 @@ func TestResetPassword_ValidToken_UpdatesPassword(t *testing.T) {
 	}
 	if len(store.stored) != 0 {
 		t.Error("reset token should be consumed (single-use)")
+	}
+	if len(auditor.entries) != 1 || auditor.entries[0].Action != audit.ActionPasswordReset {
+		t.Fatalf("unexpected password reset audit entries: %+v", auditor.entries)
 	}
 }
 

@@ -19,14 +19,14 @@ Personal and team expense tracking. Split bills, manage loans, settle debts, and
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| API | Go 1.25, Chi, pgx v5, gqlgen, Redis |
-| Frontend | Next.js 15 (App Router), Tailwind v4, shadcn/ui, React Query v5, Zustand |
-| Infrastructure | AWS CDK (TypeScript), ECS Fargate, ALB, ElastiCache, S3, SSM (ap-south-1) |
-| Database | PostgreSQL (Aiven) |
-| Auth | RS256 JWT + refresh token rotation, Google OAuth |
-| Logging | go.uber.org/zap — JSON stdout, forwardable to CloudWatch / Datadog / Loki |
+| Layer          | Tech                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------- |
+| API            | Go 1.25, Chi, pgx v5, gqlgen, Redis                                                             |
+| Frontend       | Next.js 15 (App Router), Tailwind v4, shadcn/ui, React Query v5, Zustand                        |
+| Infrastructure | AWS CDK (TypeScript), Lambda Function URL, ElastiCache, S3, SSM SecureString (`ap-southeast-1`) |
+| Database       | PostgreSQL (Aiven)                                                                              |
+| Auth           | RS256 JWT + refresh token rotation, Google OAuth                                                |
+| Logging        | go.uber.org/zap — JSON stdout, forwardable to CloudWatch / Datadog / Loki                       |
 
 ---
 
@@ -93,25 +93,26 @@ pnpm dev                    # dev server on :3000
 
 ### API (`api/.env`)
 
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | yes | PostgreSQL connection string |
-| `REDIS_URL` | yes | Redis connection string |
-| `JWT_PRIVATE_KEY` | yes | RS256 PEM private key |
-| `JWT_PUBLIC_KEY` | yes | RS256 PEM public key |
-| `PORT` | no | Default `8080` |
-| `ENV` | no | `local` \| `production`. Default `local` |
-| `LOG_LEVEL` | no | `debug` \| `info` \| `warn` \| `error`. Default `info` |
-| `S3_BUCKET` | no | Receipts bucket name |
-| `AWS_REGION` | no | Default `ap-south-1` |
-| `GOOGLE_CLIENT_ID` | no | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | no | Google OAuth client secret |
-| `FRONTEND_URL` | no | Allowed CORS origin. Default `http://localhost:3000` |
+| Variable               | Required | Description                                            |
+| ---------------------- | -------- | ------------------------------------------------------ |
+| `DATABASE_URL`         | yes      | PostgreSQL connection string                           |
+| `REDIS_URL`            | yes      | Redis connection string                                |
+| `JWT_PRIVATE_KEY`      | yes      | RS256 PEM private key                                  |
+| `JWT_PUBLIC_KEY`       | yes      | RS256 PEM public key                                   |
+| `PORT`                 | no       | Default `8080`                                         |
+| `ENV`                  | no       | `local` \| `production`. Default `local`               |
+| `LOG_LEVEL`            | no       | `debug` \| `info` \| `warn` \| `error`. Default `info` |
+| `S3_BUCKET`            | no       | Receipts bucket name                                   |
+| `AWS_REGION`           | no       | Default `ap-southeast-1`                               |
+| `GOOGLE_CLIENT_ID`     | no       | Google OAuth client ID                                 |
+| `GOOGLE_CLIENT_SECRET` | no       | Google OAuth client secret                             |
+| `FRONTEND_URL`         | no       | Allowed CORS origin. Default `http://localhost:3000`   |
 
 Generate RS256 keys:
 
 ```bash
-cd api && bash scripts/generate-jwt-keys.sh
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
 ```
 
 ### Frontend (`web/.env.local`)
@@ -154,6 +155,7 @@ pnpm tsc --noEmit   # typecheck
 pnpm lint           # eslint
 pnpm format         # prettier
 pnpm codegen        # generate TS types from GraphQL schema (API must be running)
+pnpm test:e2e        # Playwright desktop/mobile smoke tests
 ```
 
 ### Infrastructure
@@ -190,24 +192,30 @@ cdk synth                               # dry run, generate CloudFormation
 
 ## Infrastructure (AWS)
 
-Four CDK stacks deployed to `ap-south-1`:
+Four CDK stacks deploy in dependency order to `ap-southeast-1`:
 
 ```
 SplitlegerNetwork → SplitlegerData → SplitlegerApp → SplitlegerPipeline
 ```
 
-- **Network** — VPC, subnets, security groups. No NAT Gateway (saves ~$32/month).
-- **Data** — ElastiCache Redis, S3, SSM Parameter Store, CloudWatch log group.
-- **App** — ECR, ECS Fargate, ALB, ACM cert, Route 53.
-- **Pipeline** — GitHub OIDC role for Actions deploys (no static AWS keys).
+- **Network** — VPC, one NAT gateway, private Lambda subnets, Redis/Lambda security groups, S3 gateway endpoint.
+- **Data** — ElastiCache Redis, locked-down S3 receipts bucket, encrypted SSM parameters.
+- **App** — native Go Lambda Function URL, VPC placement, SSM/KMS/S3/SES permissions, CloudWatch logs.
+- **Pipeline** — GitHub OIDC role trusted only by `Ke-vin-S/ledger` on `main`.
 
-First-time deploy:
+The app stack bundles the API locally with Docker. `cdk synth` and CDK tests are safe local checks; `cdk diff` and `cdk deploy` are the commands that contact AWS.
+
+First deployment:
 
 ```bash
-cdk bootstrap aws://ACCOUNT_ID/ap-south-1
-cdk deploy --all --require-approval broadening
-# then populate SSM secrets — see infra/CLAUDE.md
+cd infra
+npx cdk synth
+npx cdk diff --all
+npx cdk bootstrap aws://ACCOUNT_ID/ap-southeast-1  # once
+npx cdk deploy --all --require-approval broadening
 ```
+
+After deployment, replace the `REPLACE_ME` values in the eight encrypted SSM parameters documented in `infra/README.md`. Set Vercel's `NEXT_PUBLIC_API_URL` to the `ApiFunctionUrl` stack output. The deploy workflow builds and publishes the native Lambda `bootstrap` binary through GitHub OIDC; no ECR, ECS, static AWS keys, or setup script is used.
 
 ---
 
@@ -215,11 +223,11 @@ cdk deploy --all --require-approval broadening
 
 The API writes structured JSON to stdout. Forward to any service without code changes:
 
-| Destination | How |
-|---|---|
-| AWS CloudWatch | ECS / Lambda stdout is captured automatically |
-| Datadog | `DD_LOGS_ENABLED=true` + container log tag |
-| Grafana Loki | alloy or promtail on the container log stream |
+| Destination      | How                                              |
+| ---------------- | ------------------------------------------------ |
+| AWS CloudWatch   | Lambda logs are captured automatically           |
+| Datadog          | `DD_LOGS_ENABLED=true` + container log tag       |
+| Grafana Loki     | alloy or promtail on the container log stream    |
 | Elastic / Splunk | Filebeat / Universal Forwarder on the log stream |
 
 Set `LOG_LEVEL=debug` for verbose request-level detail.

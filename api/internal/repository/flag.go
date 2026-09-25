@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,13 +23,36 @@ func NewFlagRepo(pool *pgxpool.Pool) flag.Repository {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (r *flagRepo) Create(ctx context.Context, f *flag.Flag) (*flag.Flag, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin flag tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `
 		INSERT INTO expense_flags (expense_id, raised_by, reason, status)
 		VALUES ($1, $2, $3, 'open')
 		RETURNING id, expense_id, raised_by, reason, status,
 		          resolved_by, resolution_note, resolved_at, created_at
 	`, f.ExpenseID, f.RaisedBy, f.Reason)
-	return scanFlag(row)
+	created, err := scanFlag(row)
+	if err != nil {
+		return nil, fmt.Errorf("insert flag: %w", err)
+	}
+	recipients, err := expenseParticipantIDs(ctx, tx, f.ExpenseID)
+	if err != nil {
+		return nil, fmt.Errorf("find expense participants: %w", err)
+	}
+	if err := createTx(ctx, tx, recipients, "flag.raised", "expense_flag", created.ID, map[string]any{
+		"expense_id": f.ExpenseID,
+		"reason":     f.Reason,
+		"raised_by":  f.RaisedBy,
+	}); err != nil {
+		return nil, fmt.Errorf("notify expense participants: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit flag: %w", err)
+	}
+	return created, nil
 }
 
 // ── FindByID ──────────────────────────────────────────────────────────────────

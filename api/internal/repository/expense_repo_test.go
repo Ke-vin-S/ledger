@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -128,6 +129,7 @@ func TestExpenseRepo_SaveCorrection_SnapshotsAndBumpsVersion(t *testing.T) {
 	repo := repository.NewExpenseRepo(pool)
 
 	owner := seedUser(t, pool, "Owner")
+	corrector := seedUser(t, pool, "Corrector")
 	teamID := seedTeam(t, pool, owner)
 	created, _, err := repo.Create(ctx, newTeamExpense(teamID, owner, 3000), nil)
 	if err != nil {
@@ -137,7 +139,8 @@ func TestExpenseRepo_SaveCorrection_SnapshotsAndBumpsVersion(t *testing.T) {
 	corrected := newTeamExpense(teamID, owner, 4000)
 	corrected.ID = created.ID
 	corrected.Version = 2
-	saved, _, err := repo.SaveCorrection(ctx, created.ID, created, corrected, nil)
+	reason := "wrong amount"
+	saved, _, err := repo.SaveCorrection(ctx, created.ID, created, corrected, nil, corrector, &reason)
 	if err != nil {
 		t.Fatalf("correct: %v", err)
 	}
@@ -153,5 +156,52 @@ func TestExpenseRepo_SaveCorrection_SnapshotsAndBumpsVersion(t *testing.T) {
 	}
 	if snapCount != 1 {
 		t.Errorf("snapshot count for v1 = %d, want 1", snapCount)
+	}
+
+	var correctedBy uuid.UUID
+	var storedReason *string
+	if err := pool.QueryRow(ctx, `
+		SELECT corrected_by, correction_reason
+		FROM expense_versions
+		WHERE expense_id = $1 AND version = 1
+	`, created.ID).Scan(&correctedBy, &storedReason); err != nil {
+		t.Fatalf("read correction metadata: %v", err)
+	}
+	if correctedBy != corrector {
+		t.Errorf("corrected_by = %v, want %v", correctedBy, corrector)
+	}
+	if storedReason == nil || *storedReason != reason {
+		t.Errorf("correction_reason = %v, want %q", storedReason, reason)
+	}
+}
+
+func TestExpenseRepo_SaveCorrection_StaleVersionReturnsConflict(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	repo := repository.NewExpenseRepo(pool)
+	owner := seedUser(t, pool, "Owner")
+	teamID := seedTeam(t, pool, owner)
+	created, _, err := repo.Create(ctx, newTeamExpense(teamID, owner, 1000), nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first := newTeamExpense(teamID, owner, 1100)
+	first.ID, first.Version = created.ID, 2
+	if _, _, err := repo.SaveCorrection(ctx, created.ID, created, first, nil, owner, nil); err != nil {
+		t.Fatalf("first correction: %v", err)
+	}
+	stale := newTeamExpense(teamID, owner, 1200)
+	stale.ID, stale.Version = created.ID, 2
+	_, _, err = repo.SaveCorrection(ctx, created.ID, created, stale, nil, owner, nil)
+	if !errors.Is(err, expense.ErrVersionConflict) {
+		t.Fatalf("want ErrVersionConflict, got %v", err)
+	}
+	var version int
+	if err := pool.QueryRow(ctx, `SELECT version FROM expenses WHERE id = $1`, created.ID).Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("version = %d, want 2", version)
 	}
 }

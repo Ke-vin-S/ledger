@@ -20,6 +20,19 @@ type fakeFlagRepo struct {
 	createErr  error
 }
 
+type fakeAccessChecker struct {
+	readErr  error
+	writeErr error
+}
+
+func (c *fakeAccessChecker) CanRead(context.Context, uuid.UUID, uuid.UUID) error {
+	return c.readErr
+}
+
+func (c *fakeAccessChecker) CanWrite(context.Context, uuid.UUID, uuid.UUID) error {
+	return c.writeErr
+}
+
 func newFakeRepo() *fakeFlagRepo {
 	return &fakeFlagRepo{flags: make(map[uuid.UUID]*flag.Flag)}
 }
@@ -71,7 +84,7 @@ func (r *fakeFlagRepo) Resolve(_ context.Context, id, resolvedBy uuid.UUID, note
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(repo flag.Repository) *flag.Service {
-	return flag.NewService(repo, audit.NopLogger())
+	return flag.NewService(repo, &fakeAccessChecker{}, audit.NopLogger())
 }
 
 func seedOpenFlag(t *testing.T, repo *fakeFlagRepo, expenseID uuid.UUID) *flag.Flag {
@@ -238,7 +251,7 @@ func TestService_ListFlags_ReturnsAllForExpense(t *testing.T) {
 	seedOpenFlag(t, repo, expenseID)
 	seedOpenFlag(t, repo, otherID) // should not appear
 
-	flags, err := svc.ListFlags(context.Background(), expenseID)
+	flags, err := svc.ListFlags(context.Background(), uuid.New(), expenseID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,11 +263,55 @@ func TestService_ListFlags_ReturnsAllForExpense(t *testing.T) {
 func TestService_ListFlags_NoFlags_ReturnsEmptySlice(t *testing.T) {
 	svc := newSvc(newFakeRepo())
 
-	flags, err := svc.ListFlags(context.Background(), uuid.New())
+	flags, err := svc.ListFlags(context.Background(), uuid.New(), uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if flags == nil {
 		t.Error("want empty slice, got nil")
+	}
+}
+
+func TestService_RaiseFlag_ReadDenied(t *testing.T) {
+	repo := newFakeRepo()
+	svc := flag.NewService(repo, &fakeAccessChecker{readErr: flag.ErrForbidden}, audit.NopLogger())
+
+	_, err := svc.RaiseFlag(context.Background(), flag.RaiseInput{
+		ExpenseID: uuid.New(),
+		RaisedBy:  uuid.New(),
+		Reason:    "wrong amount",
+	})
+	if !errors.Is(err, flag.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
+func TestService_ResolveFlag_WriteDenied(t *testing.T) {
+	repo := newFakeRepo()
+	existing := seedOpenFlag(t, repo, uuid.New())
+	svc := flag.NewService(repo, &fakeAccessChecker{writeErr: flag.ErrForbidden}, audit.NopLogger())
+
+	_, err := svc.ResolveFlag(context.Background(), flag.ResolveInput{
+		FlagID:         existing.ID,
+		ResolvedBy:     uuid.New(),
+		ResolutionNote: "not allowed",
+	})
+	if !errors.Is(err, flag.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+	if existing.Status != flag.StatusOpen {
+		t.Fatal("denied resolution changed flag status")
+	}
+}
+
+func TestService_ListFlags_ReadDenied(t *testing.T) {
+	repo := newFakeRepo()
+	seedOpenFlag(t, repo, uuid.New())
+	svc := flag.NewService(repo, &fakeAccessChecker{readErr: flag.ErrForbidden}, audit.NopLogger())
+
+	_, err := svc.ListFlags(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, flag.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
 	}
 }

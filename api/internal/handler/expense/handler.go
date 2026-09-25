@@ -1,8 +1,8 @@
 package expense
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,6 +11,7 @@ import (
 
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
+	"github.com/Ke-vin-S/ledger/api/internal/handler"
 )
 
 type Handler struct {
@@ -33,7 +34,8 @@ func (h *Handler) Routes(authMW func(http.Handler) http.Handler) chi.Router {
 	r.Get("/{expenseId}", h.getExpense)
 	r.Patch("/{expenseId}", h.correctExpense)
 	r.Delete("/{expenseId}", h.voidExpense)
-	r.Get("/{expenseId}/receipt-url", h.receiptUploadURL)
+	r.Patch("/{expenseId}/void", h.voidExpense)
+	r.Post("/{expenseId}/receipt", h.finalizeReceipt)
 
 	return r
 }
@@ -48,7 +50,8 @@ func (h *Handler) TeamRoutes(authMW func(http.Handler) http.Handler) chi.Router 
 	r.Get("/{expenseId}", h.getExpense)
 	r.Patch("/{expenseId}", h.correctExpense)
 	r.Delete("/{expenseId}", h.voidExpense)
-	r.Get("/{expenseId}/receipt-url", h.receiptUploadURL)
+	r.Patch("/{expenseId}/void", h.voidExpense)
+	r.Post("/{expenseId}/receipt", h.finalizeReceipt)
 
 	return r
 }
@@ -93,24 +96,24 @@ type voidBody struct {
 }
 
 type expenseResponse struct {
-	ID          uuid.UUID              `json:"id"`
-	Scope       string                 `json:"scope"`
-	TeamID      *uuid.UUID             `json:"team_id,omitempty"`
-	Title       string                 `json:"title"`
-	Amount      int64                  `json:"amount"`
-	Currency    string                 `json:"currency"`
-	CategoryID  *uuid.UUID             `json:"category_id,omitempty"`
-	PaidBy      uuid.UUID              `json:"paid_by"`
-	ExpenseDate string                 `json:"expense_date"`
-	SplitMethod *string                `json:"split_method,omitempty"`
-	ReceiptURL  *string                `json:"receipt_url,omitempty"`
-	Note        *string                `json:"note,omitempty"`
-	Version     int                    `json:"version"`
-	IsVoid      bool                   `json:"is_void"`
-	VoidReason  *string                `json:"void_reason,omitempty"`
-	CreatedBy   uuid.UUID              `json:"created_by"`
-	CreatedAt   time.Time              `json:"created_at"`
-	Splits      []splitResponse        `json:"splits"`
+	ID          uuid.UUID       `json:"id"`
+	Scope       string          `json:"scope"`
+	TeamID      *uuid.UUID      `json:"team_id,omitempty"`
+	Title       string          `json:"title"`
+	Amount      int64           `json:"amount"`
+	Currency    string          `json:"currency"`
+	CategoryID  *uuid.UUID      `json:"category_id,omitempty"`
+	PaidBy      uuid.UUID       `json:"paid_by"`
+	ExpenseDate string          `json:"expense_date"`
+	SplitMethod *string         `json:"split_method,omitempty"`
+	ReceiptURL  *string         `json:"receipt_url,omitempty"`
+	Note        *string         `json:"note,omitempty"`
+	Version     int             `json:"version"`
+	IsVoid      bool            `json:"is_void"`
+	VoidReason  *string         `json:"void_reason,omitempty"`
+	CreatedBy   uuid.UUID       `json:"created_by"`
+	CreatedAt   time.Time       `json:"created_at"`
+	Splits      []splitResponse `json:"splits"`
 }
 
 type splitResponse struct {
@@ -126,8 +129,7 @@ func (h *Handler) createPersonalExpense(w http.ResponseWriter, r *http.Request) 
 	actorID := jwtauth.MustUserID(r.Context())
 
 	var body createExpenseBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondErr(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+	if !handler.Decode(w, r, &body) {
 		return
 	}
 
@@ -148,7 +150,7 @@ func (h *Handler) createPersonalExpense(w http.ResponseWriter, r *http.Request) 
 		handleErr(w, r, svcErr)
 		return
 	}
-	respondJSON(w, r, http.StatusCreated, map[string]any{"data": toExpenseResponse(result)})
+	handler.JSON(w, r, http.StatusCreated, toExpenseResponse(result))
 }
 
 func (h *Handler) createTeamExpense(w http.ResponseWriter, r *http.Request) {
@@ -159,8 +161,7 @@ func (h *Handler) createTeamExpense(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body createExpenseBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondErr(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+	if !handler.Decode(w, r, &body) {
 		return
 	}
 
@@ -177,7 +178,7 @@ func (h *Handler) createTeamExpense(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, svcErr)
 		return
 	}
-	respondJSON(w, r, http.StatusCreated, map[string]any{"data": toExpenseResponse(result)})
+	handler.JSON(w, r, http.StatusCreated, toExpenseResponse(result))
 }
 
 func (h *Handler) getExpense(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +193,7 @@ func (h *Handler) getExpense(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, err)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": toExpenseResponse(result)})
+	handler.JSON(w, r, http.StatusOK, toExpenseResponse(result))
 }
 
 func (h *Handler) listMyExpenses(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +209,7 @@ func (h *Handler) listMyExpenses(w http.ResponseWriter, r *http.Request) {
 	for _, res := range results {
 		items = append(items, toExpenseResponse(res))
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": items})
+	handler.JSON(w, r, http.StatusOK, items)
 }
 
 func (h *Handler) listTeamExpenses(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +229,7 @@ func (h *Handler) listTeamExpenses(w http.ResponseWriter, r *http.Request) {
 	for _, res := range results {
 		items = append(items, toExpenseResponse(res))
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": items})
+	handler.JSON(w, r, http.StatusOK, items)
 }
 
 func (h *Handler) correctExpense(w http.ResponseWriter, r *http.Request) {
@@ -239,8 +240,7 @@ func (h *Handler) correctExpense(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body correctExpenseBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondErr(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+	if !handler.Decode(w, r, &body) {
 		return
 	}
 
@@ -260,6 +260,11 @@ func (h *Handler) correctExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	splits, err := toSplitInputs(body.Splits)
+	if err != nil {
+		respondErr(w, r, http.StatusBadRequest, "INVALID_INPUT", err.Error(), "")
+		return
+	}
 	input := expense.CorrectInput{
 		Title:            body.Title,
 		Amount:           body.Amount,
@@ -268,7 +273,7 @@ func (h *Handler) correctExpense(w http.ResponseWriter, r *http.Request) {
 		PaidBy:           paidBy,
 		ExpenseDate:      expDate,
 		SplitMethod:      body.SplitMethod,
-		Splits:           toSplitInputs(body.Splits),
+		Splits:           splits,
 		Note:             body.Note,
 		ReceiptURL:       body.ReceiptURL,
 		CorrectionReason: body.CorrectionReason,
@@ -279,7 +284,7 @@ func (h *Handler) correctExpense(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, svcErr)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{"data": toExpenseResponse(result)})
+	handler.JSON(w, r, http.StatusOK, toExpenseResponse(result))
 }
 
 func (h *Handler) voidExpense(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +295,9 @@ func (h *Handler) voidExpense(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body voidBody
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if !handler.Decode(w, r, &body) {
+		return
+	}
 
 	if err := h.svc.VoidExpense(r.Context(), actorID, expID, body.Reason); err != nil {
 		handleErr(w, r, err)
@@ -316,9 +323,27 @@ func (h *Handler) receiptUploadURL(w http.ResponseWriter, r *http.Request) {
 		handleErr(w, r, err)
 		return
 	}
-	respondJSON(w, r, http.StatusOK, map[string]any{
-		"data": map[string]string{"upload_url": uploadURL, "key": key},
-	})
+	handler.JSON(w, r, http.StatusOK, map[string]string{"upload_url": uploadURL, "key": key})
+}
+
+func (h *Handler) finalizeReceipt(w http.ResponseWriter, r *http.Request) {
+	actorID := jwtauth.MustUserID(r.Context())
+	expID, ok := parseUUID(w, r, chi.URLParam(r, "expenseId"))
+	if !ok {
+		return
+	}
+	var body struct {
+		ReceiptURL string `json:"receipt_url"`
+	}
+	if !handler.Decode(w, r, &body) {
+		return
+	}
+	result, err := h.svc.FinalizeReceipt(r.Context(), actorID, expID, body.ReceiptURL)
+	if err != nil {
+		handleErr(w, r, err)
+		return
+	}
+	handler.JSON(w, r, http.StatusOK, toExpenseResponse(&expense.ExpenseWithSplits{Expense: *result}))
 }
 
 // ── mapping helpers ───────────────────────────────────────────────────────────
@@ -347,6 +372,10 @@ func buildCreateInput(body createExpenseBody, teamID *uuid.UUID, actorID uuid.UU
 		scope = expense.ScopeTeam
 	}
 
+	splits, err := toSplitInputs(body.Splits)
+	if err != nil {
+		return expense.CreateInput{}, err
+	}
 	return expense.CreateInput{
 		Scope:       scope,
 		TeamID:      teamID,
@@ -357,7 +386,7 @@ func buildCreateInput(body createExpenseBody, teamID *uuid.UUID, actorID uuid.UU
 		PaidBy:      paidBy,
 		ExpenseDate: expDate,
 		SplitMethod: body.SplitMethod,
-		Splits:      toSplitInputs(body.Splits),
+		Splits:      splits,
 		BorrowerID:  borrowerID,
 		Note:        body.Note,
 	}, nil
@@ -370,12 +399,12 @@ func (b createExpenseBody) scope() string {
 	return expense.ScopePersonal
 }
 
-func toSplitInputs(raw []splitInputJSON) []expense.SplitInput {
+func toSplitInputs(raw []splitInputJSON) ([]expense.SplitInput, error) {
 	out := make([]expense.SplitInput, 0, len(raw))
-	for _, s := range raw {
+	for i, s := range raw {
 		id, err := uuid.Parse(s.UserID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("splits[%d].user_id must be a valid UUID", i)
 		}
 		out = append(out, expense.SplitInput{
 			UserID:      id,
@@ -383,7 +412,7 @@ func toSplitInputs(raw []splitInputJSON) []expense.SplitInput {
 			ShareUnits:  s.ShareUnits,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func toExpenseResponse(e *expense.ExpenseWithSplits) expenseResponse {
@@ -428,6 +457,8 @@ func handleErr(w http.ResponseWriter, r *http.Request, err error) {
 		respondErr(w, r, http.StatusForbidden, "FORBIDDEN", "insufficient permission", "")
 	case errors.Is(err, expense.ErrAlreadyVoided):
 		respondErr(w, r, http.StatusConflict, "ALREADY_VOIDED", "expense is already voided", "")
+	case errors.Is(err, expense.ErrVersionConflict):
+		respondErr(w, r, http.StatusConflict, "VERSION_CONFLICT", "expense was modified by another request", "")
 	case errors.Is(err, expense.ErrInvalidSplitSum):
 		respondErr(w, r, http.StatusUnprocessableEntity, "INVALID_SPLIT_SUM", "split amounts do not sum to expense amount", "splits")
 	case errors.Is(err, expense.ErrInvalidSplitData):
@@ -461,19 +492,6 @@ func parseOptUUID(s *string) (*uuid.UUID, error) {
 	return &id, nil
 }
 
-func respondJSON(w http.ResponseWriter, r *http.Request, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
 func respondErr(w http.ResponseWriter, r *http.Request, status int, code, message, field string) {
-	payload := map[string]any{
-		"error": map[string]string{
-			"code":    code,
-			"message": message,
-			"field":   field,
-		},
-	}
-	respondJSON(w, r, status, payload)
+	handler.ErrorField(w, r, status, code, message, field)
 }

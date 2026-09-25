@@ -1,26 +1,24 @@
 import type { Metadata, Viewport } from "next";
-import { Sora, Plus_Jakarta_Sans } from "next/font/google";
+import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
-const sora = Sora({
+const bodyFont = DM_Sans({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-sans",
-  weight: ["300", "400", "500", "600", "700"],
 });
 
-const plusJakartaSans = Plus_Jakarta_Sans({
+const displayFont = Bricolage_Grotesque({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-serif",
-  weight: ["600", "700", "800"],
+  variable: "--font-display",
+  weight: ["700", "800"],
 });
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
 };
 
@@ -51,7 +49,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${sora.variable} ${plusJakartaSans.variable} font-sans`}>
+      <body className={`${bodyFont.variable} ${displayFont.variable} font-sans`}>
         <Providers>{children}</Providers>
       </body>
     </html>

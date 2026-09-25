@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,96 @@ func (r *settlementRepo) Create(ctx context.Context, s *settlement.Settlement) (
 	`, s.ExpenseID, s.PayerID, s.PayeeID, s.Amount, s.Method, s.MethodNote,
 		s.RecordedBy, s.SettledOn.Format("2006-01-02"))
 	return scanSettlement(row)
+}
+
+func (r *settlementRepo) RecordSettlementTx(ctx context.Context, s *settlement.Settlement) (*settlement.Settlement, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin settlement tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var share int64
+	var creditorID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT es.share_amount, e.paid_by
+		FROM expense_splits es
+		JOIN expenses e ON e.id = es.expense_id
+		WHERE es.expense_id = $1
+		  AND es.user_id = $2
+		  AND es.version = e.version
+		  AND e.is_void = FALSE
+		FOR UPDATE OF es
+	`, s.ExpenseID, s.PayerID).Scan(&share, &creditorID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, settlement.ErrNoDebt
+		}
+		return nil, fmt.Errorf("lock debtor split: %w", err)
+	}
+	if creditorID != s.PayeeID {
+		return nil, settlement.ErrInvalidPayee
+	}
+
+	var reserved int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM settlements
+		WHERE expense_id = $1
+		  AND payer_id = $2
+		  AND payee_id = $3
+		  AND status IN ('pending_confirmation', 'confirmed')
+	`, s.ExpenseID, s.PayerID, s.PayeeID).Scan(&reserved); err != nil {
+		return nil, fmt.Errorf("sum reserved settlements: %w", err)
+	}
+	available := share - reserved
+	if s.Amount > available {
+		return nil, fmt.Errorf("%w: amount %d exceeds balance %d", settlement.ErrSettlementExceedsDebt, s.Amount, available)
+	}
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO settlements
+			(expense_id, payer_id, payee_id, amount, method, method_note,
+			 status, recorded_by, settled_on)
+		VALUES ($1,$2,$3,$4,$5,$6,'pending_confirmation',$7,$8)
+		RETURNING id, expense_id, payer_id, payee_id, amount, method, method_note,
+		          status, recorded_by, confirmed_by, confirmed_at,
+		          disputed_by, disputed_at, dispute_reason, settled_on, created_at
+	`, s.ExpenseID, s.PayerID, s.PayeeID, s.Amount, s.Method, s.MethodNote,
+		s.RecordedBy, s.SettledOn.Format("2006-01-02"))
+	created, err := scanSettlement(row)
+	if err != nil {
+		return nil, fmt.Errorf("insert settlement: %w", err)
+	}
+	if err := createTx(ctx, tx, []uuid.UUID{s.PayeeID}, "settlement.created", "settlement", created.ID, map[string]any{
+		"expense_id": s.ExpenseID,
+		"amount":     s.Amount,
+		"payer_id":   s.PayerID,
+	}); err != nil {
+		return nil, fmt.Errorf("notify payee: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit settlement: %w", err)
+	}
+	return created, nil
+}
+
+// ── FindExpense ───────────────────────────────────────────────────────────────
+
+func (r *settlementRepo) FindExpense(ctx context.Context, id uuid.UUID) (*settlement.ExpenseAccess, error) {
+	var expense settlement.ExpenseAccess
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, paid_by, team_id
+		FROM expenses
+		WHERE id = $1 AND is_void = FALSE
+	`, id).Scan(&expense.ID, &expense.PaidBy, &expense.TeamID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, settlement.ErrNotFound
+		}
+		return nil, err
+	}
+	return &expense, nil
 }
 
 // ── FindByID ──────────────────────────────────────────────────────────────────
@@ -84,7 +175,61 @@ func (r *settlementRepo) ListByExpense(ctx context.Context, expenseID uuid.UUID)
 // ── Confirm ───────────────────────────────────────────────────────────────────
 
 func (r *settlementRepo) Confirm(ctx context.Context, id, confirmedBy uuid.UUID) (*settlement.Settlement, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin confirm settlement tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var expenseID, payerID, payeeID uuid.UUID
+	var amount int64
+	err = tx.QueryRow(ctx, `
+		SELECT expense_id, payer_id, payee_id, amount
+		FROM settlements
+		WHERE id = $1 AND status = 'pending_confirmation'
+		FOR UPDATE
+	`, id).Scan(&expenseID, &payerID, &payeeID, &amount)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, settlement.ErrInvalidStatus
+		}
+		return nil, fmt.Errorf("lock pending settlement: %w", err)
+	}
+
+	var share int64
+	if err := tx.QueryRow(ctx, `
+		SELECT es.share_amount
+		FROM expense_splits es
+		JOIN expenses e ON e.id = es.expense_id
+		WHERE es.expense_id = $1
+		  AND es.user_id = $2
+		  AND es.version = e.version
+		  AND e.is_void = FALSE
+		FOR UPDATE OF es
+	`, expenseID, payerID).Scan(&share); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, settlement.ErrNoDebt
+		}
+		return nil, fmt.Errorf("lock debtor split for confirm: %w", err)
+	}
+
+	var reserved int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM settlements
+		WHERE expense_id = $1
+		  AND payer_id = $2
+		  AND payee_id = $3
+		  AND status IN ('pending_confirmation', 'confirmed')
+		  AND id <> $4
+	`, expenseID, payerID, payeeID, id).Scan(&reserved); err != nil {
+		return nil, fmt.Errorf("sum settlements before confirm: %w", err)
+	}
+	if amount > share-reserved {
+		return nil, fmt.Errorf("%w: amount %d exceeds balance %d", settlement.ErrSettlementExceedsDebt, amount, share-reserved)
+	}
+
+	row := tx.QueryRow(ctx, `
 		UPDATE settlements
 		SET status='confirmed', confirmed_by=$1, confirmed_at=NOW()
 		WHERE id=$2 AND status='pending_confirmation'
@@ -92,20 +237,32 @@ func (r *settlementRepo) Confirm(ctx context.Context, id, confirmedBy uuid.UUID)
 		          status, recorded_by, confirmed_by, confirmed_at,
 		          disputed_by, disputed_at, dispute_reason, settled_on, created_at
 	`, confirmedBy, id)
-	s, err := scanSettlement(row)
+	confirmed, err := scanSettlement(row)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, settlement.ErrInvalidStatus
-		}
-		return nil, err
+		return nil, fmt.Errorf("confirm settlement: %w", err)
 	}
-	return s, nil
+	if err := createTx(ctx, tx, []uuid.UUID{payerID}, "settlement.confirmed", "settlement", id, map[string]any{
+		"expense_id": expenseID,
+		"amount":     amount,
+		"payee_id":   payeeID,
+	}); err != nil {
+		return nil, fmt.Errorf("notify payer of confirmation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit confirmed settlement: %w", err)
+	}
+	return confirmed, nil
 }
 
 // ── Dispute ───────────────────────────────────────────────────────────────────
 
 func (r *settlementRepo) Dispute(ctx context.Context, id, disputedBy uuid.UUID, reason string) (*settlement.Settlement, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin dispute settlement tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `
 		UPDATE settlements
 		SET status='disputed', disputed_by=$1, disputed_at=NOW(), dispute_reason=$2
 		WHERE id=$3 AND status='pending_confirmation'
@@ -113,14 +270,24 @@ func (r *settlementRepo) Dispute(ctx context.Context, id, disputedBy uuid.UUID, 
 		          status, recorded_by, confirmed_by, confirmed_at,
 		          disputed_by, disputed_at, dispute_reason, settled_on, created_at
 	`, disputedBy, reason, id)
-	s, err := scanSettlement(row)
+	disputed, err := scanSettlement(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, settlement.ErrInvalidStatus
 		}
 		return nil, err
 	}
-	return s, nil
+	if err := createTx(ctx, tx, []uuid.UUID{disputed.PayerID}, "settlement.disputed", "settlement", id, map[string]any{
+		"expense_id": disputed.ExpenseID,
+		"amount":     disputed.Amount,
+		"reason":     reason,
+	}); err != nil {
+		return nil, fmt.Errorf("notify payer of dispute: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit disputed settlement: %w", err)
+	}
+	return disputed, nil
 }
 
 // ── Balance views ─────────────────────────────────────────────────────────────
@@ -152,11 +319,11 @@ func (r *settlementRepo) ListTeamNetBalances(ctx context.Context, teamID, actorI
 		SELECT
 			CASE WHEN user_a = $2 THEN user_b ELSE user_a END AS counterparty_id,
 			u.display_name AS counterparty_name,
-			CASE WHEN user_a = $2 THEN net_amount ELSE -net_amount END AS net_amount
+			CASE WHEN user_a = $2 THEN -net_amount ELSE net_amount END AS net_amount
 		FROM team_net_balances tnb
 		JOIN users u ON u.id = CASE WHEN user_a = $2 THEN user_b ELSE user_a END
 		WHERE tnb.team_id = $1 AND (tnb.user_a = $2 OR tnb.user_b = $2)
-		ORDER BY ABS(CASE WHEN user_a = $2 THEN net_amount ELSE -net_amount END) DESC
+		ORDER BY ABS(CASE WHEN user_a = $2 THEN -net_amount ELSE net_amount END) DESC
 	`, teamID, actorID)
 	if err != nil {
 		return nil, err
@@ -227,4 +394,3 @@ func scanSettlement(row pgx.Row) (*settlement.Settlement, error) {
 	s.SettledOn = settledOnRaw
 	return &s, nil
 }
-

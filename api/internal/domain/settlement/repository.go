@@ -9,8 +9,10 @@ import (
 // Repository is the persistence interface for settlements and balance views.
 type Repository interface {
 	Create(ctx context.Context, s *Settlement) (*Settlement, error)
+	RecordSettlementTx(ctx context.Context, s *Settlement) (*Settlement, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*Settlement, error)
 	ListByExpense(ctx context.Context, expenseID uuid.UUID) ([]*Settlement, error)
+	FindExpense(ctx context.Context, id uuid.UUID) (*ExpenseAccess, error)
 
 	// Confirm transitions status to 'confirmed'. Returns ErrInvalidStatus if not pending.
 	Confirm(ctx context.Context, id, confirmedBy uuid.UUID) (*Settlement, error)
