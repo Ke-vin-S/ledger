@@ -81,6 +81,30 @@ func TestFlagRepo_CreateAndResolve(t *testing.T) {
 	}
 }
 
+func TestFlagRepo_Create_NotifiesExpenseParticipants(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	expenseRepo := repository.NewExpenseRepo(pool)
+	flagRepo := repository.NewFlagRepo(pool)
+	creditor := seedUser(t, pool, "Creditor")
+	debtor := seedUser(t, pool, "Debtor")
+	teamID := seedTeam(t, pool, creditor)
+	expenseID := seedExpenseWithDebt(t, ctx, expenseRepo, teamID, creditor, debtor, 1000)
+
+	created, err := flagRepo.Create(ctx, &flag.Flag{ExpenseID: expenseID, RaisedBy: debtor, Reason: "wrong amount"})
+	if err != nil {
+		t.Fatalf("create flag: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE type='flag.raised' AND entity_id=$1`, created.ID).Scan(&count); err != nil {
+		t.Fatalf("count notifications: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("participant notifications = %d, want 2", count)
+	}
+}
+
 func TestNotificationRepo_ListAndPrefs(t *testing.T) {
 	pool := requireDB(t)
 	truncateAll(t, pool)
@@ -89,11 +113,9 @@ func TestNotificationRepo_ListAndPrefs(t *testing.T) {
 
 	userID := seedUser(t, pool, "User")
 
-	// Notifications are written by other flows; insert one directly to exercise List.
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO notifications (user_id, type, entity_type, entity_id) VALUES ($1, 'expense.created', 'expense', $2)`,
-		userID, uuid.New()); err != nil {
-		t.Fatalf("seed notification: %v", err)
+	entityID := uuid.New()
+	if err := repo.Create(ctx, []uuid.UUID{userID}, "expense.created", "expense", &entityID, map[string]any{"title": "Dinner"}); err != nil {
+		t.Fatalf("create notification: %v", err)
 	}
 
 	items, err := repo.List(ctx, notification.ListParams{UserID: userID, Limit: 20})
@@ -119,5 +141,35 @@ func TestNotificationRepo_ListAndPrefs(t *testing.T) {
 	}
 	if len(got.DisabledTypes) != 1 || got.DisabledTypes[0] != "expense.created" {
 		t.Errorf("disabled types = %v, want [expense.created]", got.DisabledTypes)
+	}
+}
+
+func TestNotificationRepo_List_CompositeCursorDoesNotDropTimestampTies(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	repo := repository.NewNotificationRepo(pool)
+	userID := seedUser(t, pool, "User")
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
+	for _, id := range ids {
+		if _, err := pool.Exec(ctx, `INSERT INTO notifications (id, user_id, type, entity_type, entity_id, created_at) VALUES ($1,$2,'expense.created','expense',$3,$4)`, id, userID, uuid.New(), createdAt); err != nil {
+			t.Fatalf("seed notification: %v", err)
+		}
+	}
+	first, err := repo.List(ctx, notification.ListParams{UserID: userID, Limit: 2})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("first page length = %d, want 2", len(first))
+	}
+	cursor := first[1].CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + first[1].ID.String()
+	second, err := repo.List(ctx, notification.ListParams{UserID: userID, Limit: 2, Cursor: cursor})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second) != 1 || second[0].ID == first[0].ID || second[0].ID == first[1].ID {
+		t.Fatalf("second page = %+v, want the remaining tied row", second)
 	}
 }

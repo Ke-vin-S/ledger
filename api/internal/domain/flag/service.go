@@ -11,16 +11,20 @@ import (
 
 type Service struct {
 	repo    Repository
+	access  ExpenseAccessChecker
 	auditor audit.Logger
 }
 
-func NewService(repo Repository, auditor audit.Logger) *Service {
-	return &Service{repo: repo, auditor: auditor}
+func NewService(repo Repository, access ExpenseAccessChecker, auditor audit.Logger) *Service {
+	return &Service{repo: repo, access: access, auditor: auditor}
 }
 
 func (s *Service) RaiseFlag(ctx context.Context, in RaiseInput) (*Flag, error) {
 	if strings.TrimSpace(in.Reason) == "" {
 		return nil, ErrInvalidInput
+	}
+	if err := s.access.CanRead(ctx, in.RaisedBy, in.ExpenseID); err != nil {
+		return nil, err
 	}
 
 	f := &Flag{
@@ -55,6 +59,9 @@ func (s *Service) ResolveFlag(ctx context.Context, in ResolveInput) (*Flag, erro
 	if err != nil {
 		return nil, err
 	}
+	if err := s.access.CanWrite(ctx, in.ResolvedBy, existing.ExpenseID); err != nil {
+		return nil, err
+	}
 
 	if existing.Status == StatusResolved {
 		return nil, ErrAlreadyResolved
@@ -77,7 +84,10 @@ func (s *Service) ResolveFlag(ctx context.Context, in ResolveInput) (*Flag, erro
 	return resolved, nil
 }
 
-func (s *Service) ListFlags(ctx context.Context, expenseID uuid.UUID) ([]*Flag, error) {
+func (s *Service) ListFlags(ctx context.Context, actorID, expenseID uuid.UUID) ([]*Flag, error) {
+	if err := s.access.CanRead(ctx, actorID, expenseID); err != nil {
+		return nil, err
+	}
 	flags, err := s.repo.ListByExpense(ctx, expenseID)
 	if err != nil {
 		return nil, err

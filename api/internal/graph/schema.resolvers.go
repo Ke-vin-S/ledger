@@ -8,6 +8,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
@@ -21,17 +22,32 @@ func (r *queryResolver) TeamActivityFeed(ctx context.Context, teamID string, lim
 	if err != nil {
 		return nil, fmt.Errorf("invalid teamId: %w", err)
 	}
+	claims := jwtauth.ClaimsFrom(ctx)
+	if claims == nil {
+		return nil, fmt.Errorf("unauthenticated")
+	}
+	actorID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subject in token: %w", err)
+	}
+	if err := r.memberships.RequireMembership(ctx, tid, actorID, "member"); err != nil {
+		return nil, err
+	}
 
 	lim := 20
 	if limit != nil && *limit > 0 && *limit <= 100 {
 		lim = *limit
 	}
 
-	var before *time.Time
+	var before *ActivityCursor
 	if cursor != nil && *cursor != "" {
-		t, err := time.Parse(time.RFC3339Nano, *cursor)
-		if err == nil {
-			before = &t
+		tsText, idText, ok := strings.Cut(*cursor, "|")
+		if ok {
+			ts, tsErr := time.Parse(time.RFC3339Nano, tsText)
+			id, idErr := uuid.Parse(idText)
+			if tsErr == nil && idErr == nil {
+				before = &ActivityCursor{Time: ts, ID: id}
+			}
 		}
 	}
 
@@ -55,7 +71,8 @@ func (r *queryResolver) TeamActivityFeed(ctx context.Context, teamID string, lim
 		HasMore: hasMore,
 	}
 	if hasMore && len(entries) > 0 {
-		cur := entries[len(entries)-1].CreatedAt
+		last := entries[len(entries)-1]
+		cur := last.CreatedAt + "|" + last.ID
 		page.NextCursor = &cur
 	}
 	return page, nil
@@ -79,6 +96,17 @@ func (r *queryResolver) ExpenseHistory(ctx context.Context, expenseID string) ([
 	eid, err := uuid.Parse(expenseID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid expenseId: %w", err)
+	}
+	claims := jwtauth.ClaimsFrom(ctx)
+	if claims == nil {
+		return nil, fmt.Errorf("unauthenticated")
+	}
+	actorID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subject in token: %w", err)
+	}
+	if _, err := r.expenses.GetExpense(ctx, actorID, eid); err != nil {
+		return nil, err
 	}
 
 	versions, err := r.historyStore.QueryExpenseHistory(ctx, eid)

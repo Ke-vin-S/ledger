@@ -184,13 +184,38 @@ func (r *teamRepo) ListJoinRequests(ctx context.Context, teamID uuid.UUID) ([]*t
 // ── Membership writes ────────────────────────────────────────────────────────
 
 func (r *teamRepo) InsertMember(ctx context.Context, m *team.TeamMember) (*team.TeamMember, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin member tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `
 		INSERT INTO team_members (team_id, user_id, role, status, invited_by, request_message, joined_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, team_id, user_id, role, status,
 		          invited_by, request_message, resolved_by, resolved_at, joined_at, created_at
 	`, m.TeamID, m.UserID, m.Role, m.Status, m.InvitedBy, m.RequestMessage, m.JoinedAt)
-	return scanMemberCore(row)
+	created, err := scanMemberCore(row)
+	if err != nil {
+		return nil, err
+	}
+	if m.Status == team.StatusRequested {
+		admins, err := teamAdminIDs(ctx, tx, m.TeamID)
+		if err != nil {
+			return nil, err
+		}
+		if err := createTx(ctx, tx, admins, "team.join_requested", "team_member", created.ID, map[string]any{
+			"team_id": m.TeamID,
+			"user_id": m.UserID,
+			"message": m.RequestMessage,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit member: %w", err)
+	}
+	return created, nil
 }
 
 func (r *teamRepo) UpdateMember(ctx context.Context, m *team.TeamMember) (*team.TeamMember, error) {
@@ -259,6 +284,21 @@ func (r *teamRepo) FindInviteLinkByHash(ctx context.Context, tokenHash string) (
 	return l, nil
 }
 
+func (r *teamRepo) GetInviteLinkByID(ctx context.Context, linkID uuid.UUID) (*team.InviteLink, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, team_id, created_by, token_hash, max_uses, use_count, expires_at, revoked_at, created_at
+		FROM invite_links WHERE id = $1
+	`, linkID)
+	l, err := scanInviteLink(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, team.ErrInviteLinkInvalid
+		}
+		return nil, err
+	}
+	return l, nil
+}
+
 func (r *teamRepo) RevokeInviteLink(ctx context.Context, linkID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `UPDATE invite_links SET revoked_at = NOW() WHERE id = $1`, linkID)
 	return err
@@ -275,12 +315,35 @@ const invitationCols = `id, team_id, email, role, status, token_hash, invited_by
 	expires_at, accepted_by, accepted_at, cancelled_by, cancelled_at, created_at`
 
 func (r *teamRepo) CreateInvitation(ctx context.Context, inv *team.Invitation) (*team.Invitation, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin invitation tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `
 		INSERT INTO team_invitations (team_id, email, role, status, token_hash, invited_by, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+invitationCols, inv.TeamID, inv.Email, inv.Role, inv.Status,
 		inv.TokenHash, inv.InvitedBy, inv.ExpiresAt)
-	return scanInvitation(row)
+	created, err := scanInvitation(row)
+	if err != nil {
+		return nil, err
+	}
+	admins, err := teamAdminIDs(ctx, tx, created.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	if err := createTx(ctx, tx, admins, "team.invitation", "team_invitation", created.ID, map[string]any{
+		"team_id": created.TeamID,
+		"email":   created.Email,
+		"role":    created.Role,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit invitation: %w", err)
+	}
+	return created, nil
 }
 
 func (r *teamRepo) GetInvitationByID(ctx context.Context, id uuid.UUID) (*team.Invitation, error) {
@@ -475,6 +538,26 @@ func scanMembers(rows pgx.Rows) ([]*team.TeamMember, error) {
 	return members, rows.Err()
 }
 
+func teamAdminIDs(ctx context.Context, tx pgx.Tx, teamID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT user_id
+		FROM team_members
+		WHERE team_id = $1 AND status = 'active' AND role IN ('owner', 'admin')
+	`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
 func scanInviteLink(row pgx.Row) (*team.InviteLink, error) {
 	var l team.InviteLink
 	err := row.Scan(

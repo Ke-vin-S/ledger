@@ -1,0 +1,2 @@
+-- PostgreSQL enum values added with ALTER TYPE ... ADD VALUE cannot be removed safely.
+-- Rollback intentionally keeps the additive, backward-compatible values.

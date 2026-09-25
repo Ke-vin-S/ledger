@@ -10,6 +10,8 @@ import (
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/handler"
+	"github.com/Ke-vin-S/ledger/api/internal/logger"
+	"go.uber.org/zap"
 )
 
 type Handler struct {
@@ -610,7 +612,8 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 	case team.ErrInvalidEmail:
 		handler.ErrorField(w, r, http.StatusBadRequest, "INVALID_EMAIL", "a valid email address is required", "email")
 	default:
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		logger.FromContext(r.Context()).Error("team request failed", zap.Error(err))
+		handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "team request failed")
 	}
 }
 

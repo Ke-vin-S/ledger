@@ -1,578 +1,580 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useParams } from "next/navigation";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import {
-  useTeam,
-  useTeamMembers,
-  useInviteMember,
-  useTeamInvitations,
-  useCancelInvitation,
-  useResendInvitation,
-  useAddAnonymousMember,
-  useGenerateClaimToken,
-  useRemoveMember,
+  Check,
+  Link2,
+  Mail,
+  Plus,
+  RefreshCw,
+  UserPlus,
+  UserX,
+  X,
+} from "lucide-react";
+import {
   isAnonymousMember,
+  useAddAnonymousMember,
+  useCancelInvitation,
+  useGenerateClaimToken,
+  useInviteMember,
+  useResendInvitation,
+  useTeam,
+  useTeamInvitations,
+  useTeamMembers,
 } from "@/hooks/useTeam";
-import { useMe } from "@/hooks/useAuth";
-import { useExpenses, useCreateExpense, useVoidExpense } from "@/hooks/useExpenses";
+import { useExpenses } from "@/hooks/useExpenses";
 import { useTeamBalances } from "@/hooks/useSettlements";
 import { ActivityFeed } from "@/components/team/ActivityFeed";
 import { ExpenseCard } from "@/components/expense/ExpenseCard";
-import { AmountInput } from "@/components/expense/AmountInput";
-import { MemberPicker } from "@/components/expense/MemberPicker";
-import { SplitBuilder } from "@/components/expense/SplitBuilder";
-import type { PickedMember } from "@/types/team.types";
-import type { SplitMethod, SplitEntry } from "@/types/expense.types";
+import { AddExpenseSheet } from "@/components/expense/AddExpenseSheet";
 import { DebtBar } from "@/components/settlement/DebtBar";
-import { Skeleton } from "@/components/shared/Skeleton";
 import { Avatar } from "@/components/shared/Avatar";
+import { QueryBoundary } from "@/components/query-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, UserPlus, UserX, Link2, Check, Mail, RefreshCw, X } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/toast";
 import { ApiRequestError } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
 
-import { CURRENCY_CODES, SPLIT_METHODS } from "@/constants/config";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+type TeamTab = "expenses" | "members" | "balances" | "activity";
 
-const expenseSchema = z.object({
-  title: z.string().min(1, "Title is required"),
-  amount: z.number().int().positive("Amount must be positive"),
-  currency: z.string().min(1),
-  split_method: z.enum(["equal", "exact", "percentage", "shares"]),
-  expense_date: z.string().min(1, "Date is required"),
-  paid_by: z.string().min(1, "Select who paid"),
-  note: z.string().optional(),
-});
-type ExpenseFormValues = z.infer<typeof expenseSchema>;
-
-function CreateExpenseForm({ teamId, onClose }: { teamId: string; onClose: () => void }) {
-  const { data: me } = useMe();
-  const { data: teamMembers } = useTeamMembers(teamId);
-  const { mutateAsync, isPending } = useCreateExpense(teamId);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [amount, setAmount] = useState(0);
-  const [currency, setCurrency] = useState("LKR");
-  const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
-  const [participants, setParticipants] = useState<string[]>([]);
-  const [participantObjects, setParticipantObjects] = useState<PickedMember[]>([]);
-  const [splits, setSplits] = useState<SplitEntry[]>([]);
-
-  const { register, handleSubmit, setValue, control, formState: { errors } } = useForm<ExpenseFormValues>({
-    resolver: zodResolver(expenseSchema),
-    defaultValues: {
-      currency: "LKR",
-      split_method: "equal",
-      expense_date: new Date().toISOString().split("T")[0],
-      paid_by: me?.id ?? "",
-    },
-  });
-
-  async function onSubmit(data: ExpenseFormValues) {
-    if (participants.length === 0) {
-      setServerError("Select at least one participant to split with.");
-      return;
-    }
-    setServerError(null);
-    try {
-      const payload: Parameters<typeof mutateAsync>[0] = {
-        title: data.title,
-        amount: data.amount,
-        currency: data.currency,
-        split_method: data.split_method,
-        expense_date: data.expense_date,
-        paid_by: data.paid_by,
-        note: data.note || undefined,
-        splits: splits.length > 0 ? splits : participants.map((id) => ({ user_id: id })),
-      };
-      await mutateAsync(payload);
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiRequestError) setServerError(err.error.message);
-      else setServerError("Failed to create expense.");
-    }
-  }
-
+function isTeamTab(value: string): value is TeamTab {
   return (
-    <Card className="mb-4">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">New expense</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {serverError && (
-            <p className="text-sm text-[hsl(var(--destructive))]">{serverError}</p>
-          )}
-
-          <div className="space-y-1.5">
-            <Label>Title</Label>
-            <Input placeholder="e.g. Dinner at Commons" {...register("title")} />
-            {errors.title && <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Currency</Label>
-              <Controller
-                name="currency"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CURRENCY_CODES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Date</Label>
-              <Input type="date" {...register("expense_date")} />
-              {errors.expense_date && <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Amount</Label>
-            <AmountInput value={amount} currency={currency} onChange={(v) => { setAmount(v); setValue("amount", v); }} />
-            {errors.amount && <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>}
-          </div>
-
-          {/* Paid by */}
-          {teamMembers && teamMembers.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Paid by</Label>
-              <Controller
-                name="paid_by"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select who paid…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teamMembers.map((m) => (
-                        <SelectItem key={m.user_id} value={m.user_id}>
-                          {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Split method</Label>
-              <Controller
-                name="split_method"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); setSplitMethod(v as SplitMethod); }}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SPLIT_METHODS.map(({ value, label }) => (
-                        <SelectItem key={value} value={value}>{label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(opt.)</span></Label>
-              <Input placeholder="Any details" {...register("note")} />
-            </div>
-          </div>
-
-          {/* Participants */}
-          <div className="space-y-1.5">
-            <Label>Participants</Label>
-            <MemberPicker
-              teamId={teamId}
-              selected={participants}
-              onChange={setParticipants}
-              onMembersChange={setParticipantObjects}
-            />
-          </div>
-
-          {/* Split preview */}
-          {participants.length > 0 && amount > 0 && (
-            <div className="border rounded-xl p-3 bg-[hsl(var(--muted)/0.4)] space-y-2">
-              <p className="text-[0.7rem] uppercase tracking-wide font-semibold text-[hsl(var(--muted-foreground))]">Split preview</p>
-              <SplitBuilder
-                participants={participantObjects}
-                total={amount}
-                currency={currency}
-                method={splitMethod}
-                value={splits}
-                onChange={setSplits}
-              />
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-1">
-            <Button type="submit" disabled={isPending} size="sm">
-              {isPending ? "Adding…" : "Add expense"}
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+    value === "expenses" ||
+    value === "members" ||
+    value === "balances" ||
+    value === "activity"
   );
 }
 
-// ── Members Tab ─────────────────────────────────────────────────────────────
+function InviteMemberDialog({ teamId }: { teamId: string }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const { mutateAsync, isPending } = useInviteMember(teamId);
+  const { toast } = useToast();
+  const emailId = useId();
 
-function MembersTab({ teamId }: { teamId: string }) {
-  const { data: members } = useTeamMembers(teamId);
-  const { mutateAsync: inviteMember } = useInviteMember(teamId);
-  const { mutateAsync: addAnonymous } = useAddAnonymousMember(teamId);
-  const { mutateAsync: generateClaimToken } = useGenerateClaimToken();
-  useRemoveMember(teamId);
-
-  const [showInvite, setShowInvite] = useState(false);
-  const [showAddAnon, setShowAddAnon] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteError, setInviteError] = useState("");
-  const [invitePending, setInvitePending] = useState(false);
-  const [anonName, setAnonName] = useState("");
-  const [anonError, setAnonError] = useState("");
-  const [anonPending, setAnonPending] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  async function handleInvite() {
-    if (!inviteEmail) { setInviteError("Email is required"); return; }
-    setInviteError(""); setInvitePending(true);
+  async function submit() {
+    if (!email.trim()) {
+      setError("Email is required");
+      return;
+    }
+    setError("");
     try {
-      await inviteMember({ email: inviteEmail });
-      setInviteEmail(""); setShowInvite(false);
+      await mutateAsync({ email: email.trim() });
+      toast({
+        title: "Invitation sent",
+        description: email.trim(),
+        variant: "success",
+      });
+      setEmail("");
+      setOpen(false);
     } catch (err) {
-      setInviteError(err instanceof ApiRequestError ? err.error.message : "Failed to invite");
-    } finally { setInvitePending(false); }
-  }
-
-  async function handleAddAnon() {
-    if (!anonName.trim()) { setAnonError("Name is required"); return; }
-    setAnonError(""); setAnonPending(true);
-    try {
-      await addAnonymous({ display_name: anonName.trim() });
-      setAnonName(""); setShowAddAnon(false);
-    } catch (err) {
-      setAnonError(err instanceof ApiRequestError ? err.error.message : "Failed to add");
-    } finally { setAnonPending(false); }
-  }
-
-  async function handleCopyClaimLink(userId: string) {
-    try {
-      const res = await generateClaimToken(userId);
-      await navigator.clipboard.writeText(res.claim_url);
-      setCopiedId(userId);
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch { /* ignore */ }
+      setError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to send invitation.",
+      );
+    }
   }
 
   return (
-    <div className="space-y-4">
-      {/* Action buttons */}
-      <div className="flex gap-2 flex-wrap">
-        <Button size="sm" variant="outline" onClick={() => { setShowInvite(!showInvite); setShowAddAnon(false); }}>
-          <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-          Invite by email
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <UserPlus className="h-4 w-4" aria-hidden="true" /> Invite by email
         </Button>
-        <Button size="sm" variant="outline" onClick={() => { setShowAddAnon(!showAddAnon); setShowInvite(false); }}>
-          <UserX className="h-3.5 w-3.5 mr-1.5" />
-          Add without account
+      </DialogTrigger>
+      <DialogContent
+        title="Invite by email"
+        description="Send a secure invitation to join this team."
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor={emailId}>Email address</Label>
+            <Input
+              id={emailId}
+              type="email"
+              autoComplete="email"
+              placeholder="colleague@example.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              aria-invalid={error ? true : undefined}
+            />
+          </div>
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? "Sending…" : "Send invitation"}
+            </Button>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AnonymousMemberDialog({ teamId }: { teamId: string }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const { mutateAsync, isPending } = useAddAnonymousMember(teamId);
+  const { toast } = useToast();
+  const nameId = useId();
+
+  async function submit() {
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    setError("");
+    try {
+      await mutateAsync({ display_name: name.trim() });
+      toast({
+        title: "Member added",
+        description: `${name.trim()} can claim their account later.`,
+        variant: "success",
+      });
+      setName("");
+      setOpen(false);
+    } catch (err) {
+      setError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to add member.",
+      );
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <UserX className="h-4 w-4" aria-hidden="true" /> Add without account
         </Button>
-      </div>
-
-      {/* Invite by email form */}
-      {showInvite && (
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Email</Label>
-              <Input
-                type="email"
-                placeholder="colleague@example.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleInvite())}
-                className="h-8 text-sm"
-              />
-            </div>
-            {inviteError && <p className="text-xs text-[hsl(var(--destructive))]">{inviteError}</p>}
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleInvite} disabled={invitePending}>
-                {invitePending ? "Sending…" : "Send invite"}
+      </DialogTrigger>
+      <DialogContent
+        title="Add without an account"
+        description="Create a provisional member who can claim their identity later."
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor={nameId}>Display name</Label>
+            <Input
+              id={nameId}
+              placeholder="e.g. Rahul"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-invalid={error ? true : undefined}
+            />
+          </div>
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? "Adding…" : "Add member"}
+            </Button>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setShowInvite(false); setInviteError(""); }}>Cancel</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </DialogClose>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-      {/* Add anonymous form */}
-      {showAddAnon && (
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Name</Label>
-              <Input
-                placeholder="e.g. Rahul (no account)"
-                value={anonName}
-                onChange={(e) => setAnonName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddAnon())}
-                className="h-8 text-sm"
-              />
-            </div>
-            {anonError && <p className="text-xs text-[hsl(var(--destructive))]">{anonError}</p>}
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleAddAnon} disabled={anonPending}>
-                {anonPending ? "Adding…" : "Add member"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setShowAddAnon(false); setAnonError(""); }}>Cancel</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+function PendingInvitations({ teamId }: { teamId: string }) {
+  const query = useTeamInvitations(teamId);
+  const cancelInvitation = useCancelInvitation(teamId);
+  const resendInvitation = useResendInvitation(teamId);
+  const { toast } = useToast();
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-      {/* Members list */}
-      <div className="space-y-2">
-        {members?.map((m) => {
-          const isAnon = isAnonymousMember(m);
-          return (
-            <div key={m.user_id} className="flex items-center gap-3 p-3 border rounded-xl bg-[hsl(var(--card))]">
-              <Avatar name={m.display_name} size="sm" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-medium truncate">{m.display_name}</p>
-                  {isAnon && <Badge variant="outline" className="text-[0.65rem] py-0 px-1.5 border-dashed">anon</Badge>}
+  async function cancel(id: string, email: string) {
+    setBusyId(id);
+    try {
+      await cancelInvitation.mutateAsync(id);
+      toast({ title: "Invitation cancelled", description: email });
+    } catch (err) {
+      toast({
+        title: "Could not cancel invitation",
+        description:
+          err instanceof ApiRequestError ? err.error.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function resend(id: string, email: string) {
+    setBusyId(id);
+    try {
+      await resendInvitation.mutateAsync(id);
+      toast({
+        title: "Invitation resent",
+        description: email,
+        variant: "success",
+      });
+    } catch (err) {
+      toast({
+        title: "Could not resend invitation",
+        description:
+          err instanceof ApiRequestError ? err.error.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <QueryBoundary
+      {...query}
+      isEmpty={() => false}
+      className="min-h-0 border-0 bg-transparent p-0 shadow-none"
+    >
+      {(invitations) =>
+        invitations.length === 0 ? null : (
+          <section
+            aria-labelledby="pending-invitations"
+            className="space-y-3 border-t pt-6"
+          >
+            <h3 id="pending-invitations" className="text-sm font-semibold">
+              Pending invitations
+            </h3>
+            <div className="space-y-2">
+              {invitations.map((invitation) => (
+                <div
+                  key={invitation.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed bg-card p-4"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <Mail className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {invitation.email}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Expires {formatDate(invitation.expires_at)}
+                    </p>
+                  </div>
+                  <Badge variant="outline">Pending</Badge>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={busyId === invitation.id}
+                      aria-label={`Resend invitation to ${invitation.email}`}
+                      onClick={() =>
+                        void resend(invitation.id, invitation.email)
+                      }
+                    >
+                      <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={busyId === invitation.id}
+                      aria-label={`Cancel invitation to ${invitation.email}`}
+                      onClick={() =>
+                        void cancel(invitation.id, invitation.email)
+                      }
+                    >
+                      <X className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  {isAnon ? "No account — awaiting claim" : m.status}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Badge variant="secondary" className="text-xs">{m.role}</Badge>
-                {isAnon && (
-                  <button
-                    onClick={() => handleCopyClaimLink(m.user_id)}
-                    className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-                    title="Copy claim link"
-                  >
-                    {copiedId === m.user_id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Link2 className="h-3.5 w-3.5" />}
-                  </button>
-                )}
-              </div>
+              ))}
             </div>
-          );
-        })}
-        {!members?.length && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">No members found.</p>
-        )}
-      </div>
+          </section>
+        )
+      }
+    </QueryBoundary>
+  );
+}
 
+function MembersTab({ teamId }: { teamId: string }) {
+  const membersQuery = useTeamMembers(teamId);
+  const generateClaimToken = useGenerateClaimToken();
+  const { toast } = useToast();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function copyClaimLink(userId: string, name: string) {
+    try {
+      const result = await generateClaimToken.mutateAsync(userId);
+      await navigator.clipboard.writeText(result.claim_url);
+      setCopiedId(userId);
+      toast({
+        title: "Claim link copied",
+        description: `Share it with ${name}.`,
+        variant: "success",
+      });
+      window.setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      toast({
+        title: "Could not copy claim link",
+        description:
+          err instanceof ApiRequestError ? err.error.message : "Try again.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2">
+        <InviteMemberDialog teamId={teamId} />
+        <AnonymousMemberDialog teamId={teamId} />
+      </div>
+      <QueryBoundary
+        {...membersQuery}
+        isEmpty={(members) => members.length === 0}
+        emptyMessage="No members are visible in this team yet."
+        className="min-h-48"
+      >
+        {(members) => (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {members.map((member) => {
+              const anonymous = isAnonymousMember(member);
+              return (
+                <div
+                  key={member.user_id}
+                  className="flex items-center gap-3 rounded-xl border bg-card p-4"
+                >
+                  <Avatar name={member.display_name} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">
+                        {member.display_name}
+                      </p>
+                      {anonymous ? (
+                        <Badge variant="outline">Anonymous</Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {member.role} · {member.status}
+                    </p>
+                  </div>
+                  {anonymous ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Copy claim link for ${member.display_name}`}
+                      onClick={() =>
+                        void copyClaimLink(member.user_id, member.display_name)
+                      }
+                    >
+                      {copiedId === member.user_id ? (
+                        <Check
+                          className="h-4 w-4 text-positive"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Link2 className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </QueryBoundary>
       <PendingInvitations teamId={teamId} />
     </div>
   );
 }
 
-// ── Pending invitations ──────────────────────────────────────────────────────
-
-function PendingInvitations({ teamId }: { teamId: string }) {
-  const { data: invitations } = useTeamInvitations(teamId);
-  const { mutateAsync: cancelInvitation } = useCancelInvitation(teamId);
-  const { mutateAsync: resendInvitation } = useResendInvitation(teamId);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [resentId, setResentId] = useState<string | null>(null);
-
-  if (!invitations?.length) return null;
-
-  async function handleCancel(id: string) {
-    setBusyId(id);
-    try {
-      await cancelInvitation(id);
-    } catch { /* surfaced by query state */ } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function handleResend(id: string) {
-    setBusyId(id);
-    try {
-      await resendInvitation(id);
-      setResentId(id);
-      setTimeout(() => setResentId(null), 2000);
-    } catch { /* ignore */ } finally {
-      setBusyId(null);
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-        Pending invitations
-      </p>
-      {invitations.map((inv) => (
-        <div key={inv.id} className="flex items-center gap-3 p-3 border rounded-xl border-dashed bg-[hsl(var(--card))]">
-          <div className="h-8 w-8 rounded-full bg-[hsl(var(--muted))] flex items-center justify-center shrink-0">
-            <Mail className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{inv.email}</p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">
-              Invited{inv.inviter_name ? ` by ${inv.inviter_name}` : ""} · expires{" "}
-              {new Date(inv.expires_at).toLocaleDateString()}
-            </p>
-          </div>
-          <Badge variant="outline" className="text-xs">pending</Badge>
-          <button
-            onClick={() => handleResend(inv.id)}
-            disabled={busyId === inv.id}
-            title="Resend invitation"
-            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] disabled:opacity-50"
-          >
-            {resentId === inv.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            onClick={() => handleCancel(inv.id)}
-            disabled={busyId === inv.id}
-            title="Cancel invitation"
-            className="p-1.5 rounded-md hover:bg-[hsl(var(--destructive)/0.1)] transition-colors text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] disabled:opacity-50"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Main Page ────────────────────────────────────────────────────────────────
-
 export default function TeamPage() {
   const { teamId } = useParams<{ teamId: string }>();
-  const { data: team, isLoading: teamLoading } = useTeam(teamId);
-  const { data: expenses, isLoading: expensesLoading } = useExpenses(teamId);
-  const { data: balances } = useTeamBalances(teamId);
-  useVoidExpense(teamId);
-  const [showCreateExpense, setShowCreateExpense] = useState(false);
-  const [activeTab, setActiveTab] = useState<"expenses" | "members" | "balances" | "activity">("expenses");
-
-  if (teamLoading) {
-    return (
-      <div className="p-4 md:p-8 space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64" />
-      </div>
-    );
-  }
-
-  if (!team) return null;
-
-  const tabs = [
-    { key: "expenses", label: "Expenses" },
-    { key: "members", label: "Members" },
-    { key: "balances", label: "Balances" },
-    { key: "activity", label: "Activity" },
-  ] as const;
+  const teamQuery = useTeam(teamId);
+  const membersQuery = useTeamMembers(teamId);
+  const expensesQuery = useExpenses(teamId);
+  const balancesQuery = useTeamBalances(teamId);
+  const [tab, setTab] = useState<TeamTab>("expenses");
 
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-3xl font-bold">{team.name}</h1>
-        {team.description && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">{team.description}</p>
-        )}
-      </div>
+    <main className="mx-auto max-w-6xl space-y-8 p-4 md:p-8">
+      <QueryBoundary {...teamQuery} isEmpty={() => false} className="min-h-64">
+        {(team) => {
+          const members = membersQuery.data ?? [];
+          return (
+            <>
+              <Card className="overflow-hidden border-primary/20 bg-card">
+                <CardContent className="flex flex-col gap-6 p-6 md:flex-row md:items-end md:justify-between md:p-8">
+                  <div className="min-w-0">
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">{team.currency}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {members.length}{" "}
+                        {members.length === 1 ? "member" : "members"}
+                      </span>
+                    </div>
+                    <h1 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">
+                      {team.name}
+                    </h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                      {team.description ||
+                        "Shared expenses, balances, and team activity in one calm workspace."}
+                    </p>
+                  </div>
+                  <div
+                    className="flex -space-x-2"
+                    aria-label={`${members.length} team members`}
+                  >
+                    {members.slice(0, 5).map((member) => (
+                      <Avatar
+                        key={member.user_id}
+                        name={member.display_name}
+                        size="md"
+                        className="ring-2 ring-card"
+                      />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b overflow-x-auto scrollbar-none">
-        {tabs.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
-              activeTab === key
-                ? "border-[hsl(var(--primary))] text-[hsl(var(--foreground))]"
-                : "border-transparent text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+              <Tabs
+                value={tab}
+                onValueChange={(value) => {
+                  if (isTeamTab(value)) setTab(value);
+                }}
+              >
+                <TabsList
+                  aria-label={`${team.name} sections`}
+                  className="w-full justify-start overflow-x-auto sm:w-auto"
+                >
+                  <TabsTrigger value="expenses">
+                    Expenses
+                    {expensesQuery.data
+                      ? ` (${expensesQuery.data.length})`
+                      : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="members">
+                    Members{members.length ? ` (${members.length})` : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="balances">
+                    Balances
+                    {balancesQuery.data
+                      ? ` (${balancesQuery.data.length})`
+                      : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="activity">Activity</TabsTrigger>
+                </TabsList>
 
-      {/* Expenses tab */}
-      {activeTab === "expenses" && (
-        <div className="space-y-4">
-          {!showCreateExpense && (
-            <Button size="sm" onClick={() => setShowCreateExpense(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Add expense
-            </Button>
-          )}
-          {showCreateExpense && (
-            <CreateExpenseForm teamId={teamId} onClose={() => setShowCreateExpense(false)} />
-          )}
-          {expensesLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}
-            </div>
-          ) : !expenses?.length ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No expenses yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {expenses.map((expense) => (
-                <ExpenseCard
-                  key={expense.id}
-                  expense={expense}
-                  teamId={teamId}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                <TabsContent value="expenses" className="mt-6">
+                  <div className="mb-5 flex justify-end">
+                    <AddExpenseSheet>
+                      <Button>
+                        <Plus className="h-4 w-4" aria-hidden="true" /> Add
+                        expense
+                      </Button>
+                    </AddExpenseSheet>
+                  </div>
+                  <QueryBoundary
+                    {...expensesQuery}
+                    isEmpty={(expenses) => expenses.length === 0}
+                    emptyMessage="No expenses yet. Add the first shared expense to get started."
+                    className="min-h-48"
+                  >
+                    {(expenses) => (
+                      <div className="grid gap-3">
+                        {expenses.map((expense) => (
+                          <ExpenseCard
+                            key={expense.id}
+                            expense={expense}
+                            teamId={teamId}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </QueryBoundary>
+                </TabsContent>
 
-      {/* Members tab */}
-      {activeTab === "members" && <MembersTab teamId={teamId} />}
+                <TabsContent value="members" className="mt-6">
+                  <MembersTab teamId={teamId} />
+                </TabsContent>
 
-      {/* Balances tab */}
-      {activeTab === "balances" && (
-        <div className="space-y-2">
-          {balances?.length === 0 && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">All settled up!</p>
-          )}
-          {balances?.map((b) => (
-            <DebtBar
-              key={b.counterparty_id}
-              counterpartyName={b.counterparty_name}
-              netAmount={b.net_amount}
-            />
-          ))}
-        </div>
-      )}
+                <TabsContent value="balances" className="mt-6">
+                  <QueryBoundary
+                    {...balancesQuery}
+                    isEmpty={(balances) => balances.length === 0}
+                    emptyMessage="All settled up. No outstanding team balances."
+                    className="min-h-48"
+                  >
+                    {(balances) => (
+                      <div className="grid gap-3">
+                        {balances.map((balance) => (
+                          <DebtBar
+                            key={balance.counterparty_id}
+                            counterpartyName={balance.counterparty_name}
+                            netAmount={balance.net_amount}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </QueryBoundary>
+                </TabsContent>
 
-      {/* Activity tab */}
-      {activeTab === "activity" && <ActivityFeed teamId={teamId} />}
-    </div>
+                <TabsContent value="activity" className="mt-6">
+                  <ActivityFeed teamId={teamId} />
+                </TabsContent>
+              </Tabs>
+            </>
+          );
+        }}
+      </QueryBoundary>
+    </main>
   );
 }

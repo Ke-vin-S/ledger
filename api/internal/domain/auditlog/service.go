@@ -9,16 +9,20 @@ import (
 const defaultLimit = 20
 
 type Service struct {
-	repo Repository
+	repo        Repository
+	memberships MembershipChecker
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, memberships MembershipChecker) *Service {
+	return &Service{repo: repo, memberships: memberships}
 }
 
 // ListTeamEntries returns paginated audit entries for a team, newest first.
 // Returns (items, hasMore, error).
-func (s *Service) ListTeamEntries(ctx context.Context, teamID uuid.UUID, p ListParams) ([]*LogEntry, bool, error) {
+func (s *Service) ListTeamEntries(ctx context.Context, actorID, teamID uuid.UUID, p ListParams) ([]*LogEntry, bool, error) {
+	if err := s.memberships.RequireMembership(ctx, teamID, actorID, "member"); err != nil {
+		return nil, false, err
+	}
 	p = withDefaultLimit(p)
 
 	// Fetch limit+1 to detect a next page.

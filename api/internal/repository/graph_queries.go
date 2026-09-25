@@ -20,7 +20,7 @@ func NewActivityStore(pool *pgxpool.Pool) graph.ActivityFeedStore {
 }
 
 func (s *pgActivityStore) QueryTeamActivityFeed(
-	ctx context.Context, teamID uuid.UUID, limit int, before *time.Time,
+	ctx context.Context, teamID uuid.UUID, limit int, before *graph.ActivityCursor,
 ) ([]*model.ActivityEntry, error) {
 	args := []any{teamID, limit}
 	q := `
@@ -28,10 +28,10 @@ func (s *pgActivityStore) QueryTeamActivityFeed(
 		FROM audit_log
 		WHERE team_id = $1`
 	if before != nil {
-		args = append(args, *before)
-		q += ` AND created_at < $` + itoa(len(args))
+		args = append(args, before.Time, before.ID)
+		q += ` AND (created_at, id) < ($` + itoa(len(args)-1) + `, $` + itoa(len(args)) + `)`
 	}
-	q += ` ORDER BY created_at DESC LIMIT $2`
+	q += ` ORDER BY created_at DESC, id DESC LIMIT $2`
 
 	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {

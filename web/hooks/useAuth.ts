@@ -36,7 +36,7 @@ export function useUpdateProfile() {
       api.patch<User>(API_ENDPOINTS.users.me, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users", "me"] }),
   });
-}``
+}
 
 export function useUpdateCurrencyPref() {
   const qc = useQueryClient();

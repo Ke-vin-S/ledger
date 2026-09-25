@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,8 +31,9 @@ func authAs(userID uuid.UUID) func(http.Handler) http.Handler {
 }
 
 type fakeRepo struct {
-	expense *expense.Expense
-	splits  []expense.ExpenseSplit
+	expense       *expense.Expense
+	splits        []expense.ExpenseSplit
+	correctionErr error
 }
 
 func (r *fakeRepo) Create(_ context.Context, e *expense.Expense, s []expense.ExpenseSplit) (*expense.Expense, []expense.ExpenseSplit, error) {
@@ -61,7 +63,10 @@ func (r *fakeRepo) ListForUser(_ context.Context, _ uuid.UUID, _ bool) ([]*expen
 	return nil, nil
 }
 
-func (r *fakeRepo) SaveCorrection(_ context.Context, _ uuid.UUID, _ any, newE *expense.Expense, newS []expense.ExpenseSplit) (*expense.Expense, []expense.ExpenseSplit, error) {
+func (r *fakeRepo) SaveCorrection(_ context.Context, _ uuid.UUID, _ any, newE *expense.Expense, newS []expense.ExpenseSplit, _ uuid.UUID, _ *string) (*expense.Expense, []expense.ExpenseSplit, error) {
+	if r.correctionErr != nil {
+		return nil, nil, r.correctionErr
+	}
 	r.expense = newE
 	r.splits = newS
 	return newE, newS, nil
@@ -203,6 +208,35 @@ func TestCreateTeamExpense_ExactSplitMismatch_422(t *testing.T) {
 	}
 }
 
+func TestCreateTeamExpense_MalformedSplitUUID_400(t *testing.T) {
+	actor, other := uuid.New(), uuid.New()
+	h := router(&fakeRepo{}, actor)
+	teamID := uuid.New()
+
+	rec := doJSON(t, h, http.MethodPost, "/teams/"+teamID.String()+"/expenses", createExpenseBody{
+		Title:       "Dinner",
+		Amount:      1000,
+		Currency:    "LKR",
+		PaidBy:      actor.String(),
+		ExpenseDate: "2026-01-15",
+		SplitMethod: strPtr("equal"),
+		Splits: []splitInputJSON{
+			{UserID: actor.String()},
+			{UserID: "not-a-uuid"},
+			{UserID: other.String()},
+		},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := errorCode(t, rec); code != "INVALID_INPUT" {
+		t.Fatalf("error code = %q, want INVALID_INPUT", code)
+	}
+	if !strings.Contains(rec.Body.String(), "splits[1].user_id") {
+		t.Fatalf("error body does not identify bad split: %s", rec.Body.String())
+	}
+}
+
 func TestCreateTeamExpense_BadTeamID_400(t *testing.T) {
 	actor := uuid.New()
 	h := router(&fakeRepo{}, actor)
@@ -259,6 +293,27 @@ func TestCreatePersonalExpense_NoSplits_201(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCorrectExpense_VersionConflict_409(t *testing.T) {
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: actor, Amount: 100, Currency: "LKR", Version: 1}
+	repo := &fakeRepo{expense: exp, correctionErr: expense.ErrVersionConflict}
+	h := router(repo, actor)
+
+	rec := doJSON(t, h, http.MethodPatch, "/expenses/"+exp.ID.String(), correctExpenseBody{
+		Title:       "Coffee",
+		Amount:      200,
+		Currency:    "LKR",
+		PaidBy:      actor.String(),
+		ExpenseDate: "2026-01-15",
+	})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := errorCode(t, rec); code != "VERSION_CONFLICT" {
+		t.Fatalf("error code = %q, want VERSION_CONFLICT", code)
 	}
 }
 

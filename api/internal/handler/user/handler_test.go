@@ -28,10 +28,13 @@ func authAs(userID uuid.UUID) func(http.Handler) http.Handler {
 }
 
 type fakeUserRepo struct {
-	byID map[uuid.UUID]*user.User
+	byID       map[uuid.UUID]*user.User
+	anonOwners map[uuid.UUID]uuid.UUID
 }
 
-func newFakeRepo() *fakeUserRepo { return &fakeUserRepo{byID: make(map[uuid.UUID]*user.User)} }
+func newFakeRepo() *fakeUserRepo {
+	return &fakeUserRepo{byID: make(map[uuid.UUID]*user.User), anonOwners: make(map[uuid.UUID]uuid.UUID)}
+}
 
 func (r *fakeUserRepo) FindByID(_ context.Context, id uuid.UUID) (*user.User, error) {
 	if u, ok := r.byID[id]; ok {
@@ -44,10 +47,19 @@ func (r *fakeUserRepo) Update(_ context.Context, u *user.User) (*user.User, erro
 	return u, nil
 }
 func (r *fakeUserRepo) Create(context.Context, *user.User) (*user.User, error) { return nil, nil }
-func (r *fakeUserRepo) CreateAnonymous(_ context.Context, name string, _ uuid.UUID) (*user.User, error) {
+func (r *fakeUserRepo) CreateAnonymous(_ context.Context, name string, createdBy uuid.UUID) (*user.User, error) {
 	u := &user.User{ID: uuid.New(), IdentityType: user.IdentityTypeAnonymous, DisplayName: name}
 	r.byID[u.ID] = u
+	r.anonOwners[u.ID] = createdBy
 	return u, nil
+}
+
+func (r *fakeUserRepo) GetAnonymousOwner(_ context.Context, anonUserID uuid.UUID) (uuid.UUID, error) {
+	ownerID, ok := r.anonOwners[anonUserID]
+	if !ok {
+		return uuid.Nil, user.ErrNotFound
+	}
+	return ownerID, nil
 }
 func (r *fakeUserRepo) FindByEmail(context.Context, string) (*user.User, error) {
 	return nil, user.ErrNotFound

@@ -65,8 +65,22 @@ func (r *fakeRepo) Resolve(_ context.Context, id, resolvedBy uuid.UUID, note str
 	return f, nil
 }
 
+type allowAccess struct{}
+
+func (allowAccess) CanRead(context.Context, uuid.UUID, uuid.UUID) error  { return nil }
+func (allowAccess) CanWrite(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+
+type denyAccess struct{}
+
+func (denyAccess) CanRead(context.Context, uuid.UUID, uuid.UUID) error  { return flag.ErrForbidden }
+func (denyAccess) CanWrite(context.Context, uuid.UUID, uuid.UUID) error { return flag.ErrForbidden }
+
 func router(repo flag.Repository, actor uuid.UUID) http.Handler {
-	svc := flag.NewService(repo, audit.NopLogger())
+	return routerWithAccess(repo, actor, allowAccess{})
+}
+
+func routerWithAccess(repo flag.Repository, actor uuid.UUID, access flag.ExpenseAccessChecker) http.Handler {
+	svc := flag.NewService(repo, access, audit.NopLogger())
 	h := New(svc)
 	root := chi.NewRouter()
 	root.Mount("/expenses/{expenseId}/flags", h.ExpenseRoutes(authAs(actor)))
@@ -154,5 +168,28 @@ func TestResolveFlag_Missing_404(t *testing.T) {
 	rec := doJSON(t, h, http.MethodPost, "/flags/"+uuid.New().String()+"/resolve", resolveBody{ResolutionNote: "x"})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListFlags_Forbidden_403(t *testing.T) {
+	h := routerWithAccess(newFakeRepo(), uuid.New(), denyAccess{})
+	rec := doJSON(t, h, http.MethodGet, "/expenses/"+uuid.New().String()+"/flags", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestResolveFlag_Forbidden_403(t *testing.T) {
+	repo := newFakeRepo()
+	f := &flag.Flag{ID: uuid.New(), ExpenseID: uuid.New(), RaisedBy: uuid.New(), Reason: "x", Status: flag.StatusOpen}
+	repo.flags[f.ID] = f
+	h := routerWithAccess(repo, uuid.New(), denyAccess{})
+
+	rec := doJSON(t, h, http.MethodPost, "/flags/"+f.ID.String()+"/resolve", resolveBody{ResolutionNote: "no"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if f.Status != flag.StatusOpen {
+		t.Fatal("denied resolution changed flag status")
 	}
 }
