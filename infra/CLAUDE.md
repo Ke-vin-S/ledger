@@ -1,97 +1,80 @@
 # SplitLedger — AWS CDK Infrastructure
 
-AWS CDK TypeScript. Deploys to ap-southeast-1 (Singapore). Four stacks: Network → Data → App → Pipeline.
+AWS CDK TypeScript for `ap-southeast-1` (Singapore). Four stacks: Network → Data → App → Pipeline.
 
 ## Commands
 
 ```bash
-# Install
-npm install
-
-# Build TypeScript
-npm run build
-
-# Preview changes (always run before deploy)
-cdk diff --all
-
-# Deploy all stacks (in dependency order)
-cdk deploy --all --require-approval broadening
-
-# Deploy single stack
-cdk deploy SplitlegerNetwork
-cdk deploy SplitlegerData
-cdk deploy SplitlegerApp
-cdk deploy SplitlegerPipeline
-
-# Synthesise CloudFormation (dry run, no deploy)
-cdk synth
-
-# List stacks
-cdk ls
+npm ci
+npm run build                 # TypeScript
+npm test                      # CDK assertions (bundles the Go Lambda locally)
+npx cdk synth                 # local CloudFormation synthesis
+npx cdk diff --all            # review before any deploy
+npx cdk deploy --all --require-approval broadening
+npx cdk deploy SplitlegerApp  # one stack
 ```
+
+`npm test` and `cdk synth` use Docker to bundle the Go API. They do not invoke AWS Lambda or deploy resources. `cdk diff`/`cdk deploy` are the commands that contact AWS; review their output before running them.
 
 ## Structure
 
-```
-bin/splitleger-infra.ts   # entrypoint — instantiates all stacks
+```text
+bin/splitleger-infra.ts   # stack wiring
 lib/
-  config.ts               # SINGLE SOURCE OF TRUTH for all config values
-  network-stack.ts        # VPC, subnets, security groups
-  data-stack.ts           # ElastiCache Redis, S3, SSM params, CloudWatch log group
-  app-stack.ts            # ECR, ECS Fargate, ALB, ACM, Route 53, IAM roles
-  pipeline-stack.ts       # GitHub OIDC provider, GitHub Actions deploy role
+  config.ts               # region, domain, sizing, and tags
+  network-stack.ts        # VPC, NAT, Lambda/Redis security groups
+  data-stack.ts            # Redis, S3, SecureString SSM parameters
+  app-stack.ts             # Go Lambda Function URL and least-privilege IAM
+  pipeline-stack.ts        # GitHub OIDC main-branch deploy role
 ```
 
 ## Stack dependency order
 
 `SplitlegerNetwork` → `SplitlegerData` → `SplitlegerApp` → `SplitlegerPipeline`
 
-CDK resolves cross-stack references automatically. Deploy with `--all` and let CDK sequence them.
-
 ## Architecture
 
-- No NAT Gateway (saves ~$32/month). ECS tasks run in public subnets with no public IP — reachable only via ALB security group.
-- S3 Gateway VPC endpoint is free and required for ECS to reach ECR (ECR layers are stored in S3).
-- ElastiCache Redis in isolated subnets — no internet access, only reachable from ECS task security group.
-- All secrets live in SSM Parameter Store. ECS injects them as env vars at task startup via the `secrets` field in task definition. Never hardcode secrets or put them in environment variables directly.
-- GitHub Actions uses OIDC — no static AWS keys. The `SplitlegerPipeline` stack outputs the role ARN to use in the workflow.
+- Lambda runs in isolated subnets with one NAT gateway for outbound Aiven/API access.
+- Redis is isolated and accepts traffic only from the Lambda security group.
+- S3 uses a gateway VPC endpoint and blocks all public access.
+- The API reads encrypted SSM `SecureString` values at cold start; no secret values are placed in Lambda environment variables.
+- Function URL CORS allows only the configured frontend origin and credentialed requests.
+- GitHub Actions uses OIDC and trusts only `repo:Ke-vin-S/ledger:ref:refs/heads/main`.
 
-## Config
+## Configuration
 
-All values in `lib/config.ts`. Change there — propagates everywhere. Key values to update before first deploy:
+`lib/config.ts` is the source of truth. Set the real frontend domain before deployment. The GitHub repository is wired in `bin/splitleger-infra.ts` and the pipeline role is main-branch-only.
 
-- `domainName` — your actual domain (currently `splitleger.app`)
-- GitHub repo in `bin/splitleger-infra.ts` — currently set to `Ke-vin-S/ledger`
+## SSM parameters
 
-## SSM Parameters
+The data stack creates ten parameters. Eight are `SecureString`; `s3_bucket` and `app_env` are ordinary strings. Required placeholders must be replaced with `aws ssm put-parameter --type SecureString --overwrite` before invoking the function. Required names:
 
-Data stack creates parameters with `REPLACE_ME` placeholder values. After first deploy, update with real secrets:
+- `/splitleger/db_url`
+- `/splitleger/redis_url`
+- `/splitleger/jwt_private_key`
+- `/splitleger/jwt_public_key`
+- `/splitleger/google_client_id`
+- `/splitleger/google_client_secret`
+- `/splitleger/s3_bucket`
 
-```bash
-aws ssm put-parameter --name /splitleger/db_url --value "..." --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/redis_url --value "..." --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/jwt_private_key --value "$(cat private.pem)" --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/jwt_public_key --value "$(cat public.pem)" --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/google_client_id --value "..." --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/google_client_secret --value "..." --type SecureString --overwrite
-aws ssm put-parameter --name /splitleger/aiven_ca_cert --value "$(cat ca.pem)" --type SecureString --overwrite
-```
+Optional encrypted parameters are `/splitleger/aiven_ca_cert` and `/splitleger/email_from`.
 
 ## Gotchas
 
-- Route 53 hosted zone must exist before deploying `SplitlegerApp`. The stack does a zone lookup — it fails if the zone doesn't exist yet.
-- All three stacks have `terminationProtection: true`. You must disable it manually in the console before `cdk destroy`.
-- `cdk bootstrap` must be run once per account/region before any deploy: `cdk bootstrap aws://ACCOUNT_ID/ap-southeast-1`.
-- ECS task definition generates a new revision on every `cdk deploy`. This is expected — Fargate does a rolling update only if the image tag changed.
-- `cdk diff` on `SplitlegerApp` will show IAM changes on every run due to dynamic ARN resolution. Review carefully — don't approve unexpected permission additions.
+- `cdk bootstrap aws://ACCOUNT_ID/ap-southeast-1` is required once per account/region.
+- All stacks use termination protection; disable it manually before any destroy.
+- The app stack bundles `api/` with Go 1.25 Docker; Docker is required at deploy/synthesis time.
+- `ApiFunctionUrl` is the public API endpoint. Set Vercel's `NEXT_PUBLIC_API_URL` to that output.
+- `api/scripts/setup-lambda.sh` is intentionally absent; the CDK stack and deploy workflow own Lambda creation and code updates.
 
 ## Never Do
 
-- Never put secret values in `lib/config.ts` or any TypeScript source file.
-- Never modify generated CloudFormation in `cdk.out/` — it is regenerated on every `cdk synth`.
-- Never deploy `SplitlegerApp` before `SplitlegerData` — the app stack imports SSM parameter ARNs from the data stack.
+- Never put secret values in `lib/config.ts` or TypeScript source.
+- Never modify generated CloudFormation in `cdk.out/`.
+- Never deploy `SplitlegerApp` before `SplitlegerData`; it imports the SSM parameter ARNs.
+- Never add static AWS credentials to GitHub; use the OIDC role.
 
 ## Reference
 
-- @docs/tech-stack.docx — infrastructure architecture diagram, cost breakdown, full ECS task definition, Dockerfile
-- README.md — full deployment runbook with all commands
+- `README.md` — complete local and AWS deployment runbook
+- `.github/workflows/deploy-api.yml` — test, migration, and Lambda code deployment
