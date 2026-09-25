@@ -59,6 +59,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: e2e-placeholder
     defaults:
       run:
         working-directory: web
