@@ -27,6 +27,16 @@ func newFakeRepo() *fakeRepo {
 	}
 }
 
+func (r *fakeRepo) Create(_ context.Context, recipientIDs []uuid.UUID, notificationType, entityType string, entityID *uuid.UUID, payload map[string]any) error {
+	for _, recipientID := range recipientIDs {
+		n := &notification.Notification{ID: uuid.New(), UserID: recipientID, Type: notificationType, EntityType: entityType, Payload: payload, CreatedAt: time.Now()}
+		if entityID != nil {
+			n.EntityID = *entityID
+		}
+		r.notifications[n.ID] = n
+	}
+	return nil
+}
 func (r *fakeRepo) List(_ context.Context, p notification.ListParams) ([]*notification.Notification, error) {
 	var out []*notification.Notification
 	for _, n := range r.notifications {

@@ -1,10 +1,16 @@
 package auditlog
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// MembershipChecker authorizes access to team-scoped audit history.
+type MembershipChecker interface {
+	RequireMembership(ctx context.Context, teamID, actorID uuid.UUID, minRole string) error
+}
 
 // LogEntry is the read model for a single audit_log row.
 type LogEntry struct {

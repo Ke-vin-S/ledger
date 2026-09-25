@@ -10,6 +10,7 @@ import (
 
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/auditlog"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/team"
 	"github.com/Ke-vin-S/ledger/api/internal/handler"
 )
 
@@ -44,13 +45,14 @@ func (h *Handler) MyRoutes(authMW func(http.Handler) http.Handler) chi.Router {
 // ── handlers ──────────────────────────────────────────────────────────────────
 
 func (h *Handler) listTeamEntries(w http.ResponseWriter, r *http.Request) {
+	actorID := jwtauth.MustUserID(r.Context())
 	teamID, ok := parseUUID(w, r, chi.URLParam(r, "teamId"))
 	if !ok {
 		return
 	}
 
 	params := parseListParams(r)
-	items, hasMore, err := h.svc.ListTeamEntries(r.Context(), teamID, params)
+	items, hasMore, err := h.svc.ListTeamEntries(r.Context(), actorID, teamID, params)
 	if err != nil {
 		handleErr(w, r, err)
 		return
@@ -98,11 +100,14 @@ func nextCursorFrom(items []*auditlog.LogEntry, hasMore bool) string {
 }
 
 func handleErr(w http.ResponseWriter, r *http.Request, err error) {
-	_ = err
-	if errors.Is(err, nil) {
-		return
+	switch {
+	case errors.Is(err, team.ErrNotFound):
+		handler.Error(w, r, http.StatusNotFound, "NOT_FOUND", "team not found")
+	case errors.Is(err, team.ErrNotMember), errors.Is(err, team.ErrInsufficientRole):
+		handler.Error(w, r, http.StatusForbidden, "FORBIDDEN", "insufficient permission")
+	default:
+		handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
-	handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, s string) (uuid.UUID, bool) {

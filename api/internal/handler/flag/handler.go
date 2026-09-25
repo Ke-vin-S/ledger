@@ -79,12 +79,13 @@ func (h *Handler) raiseFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listFlags(w http.ResponseWriter, r *http.Request) {
+	actorID := jwtauth.MustUserID(r.Context())
 	expenseID, ok := parseUUID(w, r, chi.URLParam(r, "expenseId"))
 	if !ok {
 		return
 	}
 
-	flags, err := h.svc.ListFlags(r.Context(), expenseID)
+	flags, err := h.svc.ListFlags(r.Context(), actorID, expenseID)
 	if err != nil {
 		handleErr(w, r, err)
 		return

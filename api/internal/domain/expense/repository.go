@@ -21,7 +21,7 @@ type Repository interface {
 
 	// SaveCorrection atomically snapshots the current version, inserts new splits,
 	// and updates the expense row to the corrected state.
-	SaveCorrection(ctx context.Context, expenseID uuid.UUID, snapshot any, newExpense *Expense, newSplits []ExpenseSplit) (*Expense, []ExpenseSplit, error)
+	SaveCorrection(ctx context.Context, expenseID uuid.UUID, snapshot any, newExpense *Expense, splits []ExpenseSplit, correctedBy uuid.UUID, correctionReason *string) (*Expense, []ExpenseSplit, error)
 
 	Void(ctx context.Context, expenseID, voidedBy uuid.UUID, reason string) error
 

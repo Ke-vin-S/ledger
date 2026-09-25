@@ -70,7 +70,7 @@ func (s *Service) Register(ctx context.Context, displayName, email, password str
 		ActorID:    &created.ID,
 		EntityType: "user",
 		EntityID:   created.ID,
-		After:      created,
+		After:      NewAuditUser(created),
 	})
 	return created, nil
 }
@@ -154,7 +154,7 @@ func (s *Service) FindOrCreateByOAuth(
 		ActorID:    &created.ID,
 		EntityType: "user",
 		EntityID:   created.ID,
-		After:      created,
+		After:      NewAuditUser(created),
 	})
 	return created, true, nil
 }
@@ -202,7 +202,7 @@ func (s *Service) UpdateMe(ctx context.Context, id uuid.UUID, displayName, avata
 		ActorID:    &id,
 		EntityType: "user",
 		EntityID:   id,
-		After:      updated,
+		After:      NewAuditUser(updated),
 	})
 	return updated, nil
 }
@@ -244,7 +244,7 @@ func (s *Service) CreateAnonymous(ctx context.Context, displayName string, creat
 		ActorID:    &createdBy,
 		EntityType: "user",
 		EntityID:   u.ID,
-		After:      u,
+		After:      NewAuditUser(u),
 		Meta:       map[string]any{"identity_type": "anonymous"},
 	})
 	return u, nil
@@ -259,6 +259,13 @@ func (s *Service) GenerateClaimToken(ctx context.Context, anonUserID, createdBy 
 	}
 	if !anonUser.IsAnonymous() {
 		return "", time.Time{}, ErrNotAnonymous
+	}
+	ownerID, err := s.repo.GetAnonymousOwner(ctx, anonUserID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if ownerID != createdBy {
+		return "", time.Time{}, ErrNotAnonymousOwner
 	}
 
 	raw := make([]byte, 32)
@@ -343,7 +350,16 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	return s.repo.UpdatePassword(ctx, userID, string(hash))
+	if err := s.repo.UpdatePassword(ctx, userID, string(hash)); err != nil {
+		return err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionPasswordReset,
+		ActorID:    &userID,
+		EntityType: "user",
+		EntityID:   userID,
+	})
+	return nil
 }
 
 // PasswordResetStore abstracts Redis (or any store) for reset tokens.
