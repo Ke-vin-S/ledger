@@ -1,12 +1,19 @@
 "use client";
-
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useExpense, useCorrectExpense, useVoidExpense } from "@/hooks/useExpenses";
-import { useExpenseSettlements, useConfirmSettlement, useDisputeSettlement } from "@/hooks/useSettlements";
+import {
+  useExpense,
+  useCorrectExpense,
+  useVoidExpense,
+} from "@/hooks/useExpenses";
+import {
+  useExpenseSettlements,
+  useConfirmSettlement,
+  useDisputeSettlement,
+} from "@/hooks/useSettlements";
 import { useExpenseHistory } from "@/hooks/useGraphQL";
 import { useTeamMembers } from "@/hooks/useTeam";
 import { useMe } from "@/hooks/useAuth";
@@ -21,7 +28,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChevronDown, ChevronUp, ArrowLeft, Check, X, AlertTriangle } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ArrowLeft,
+  Check,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 import { ApiRequestError } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { SETTLEMENT_STATUS_COLORS } from "@/constants/config";
@@ -35,17 +49,28 @@ const correctionSchema = z.object({
 type CorrectionValues = z.infer<typeof correctionSchema>;
 
 export default function ExpenseDetailPage() {
-  const { teamId, expenseId } = useParams<{ teamId: string; expenseId: string }>();
+  const { teamId, expenseId } = useParams<{
+    teamId: string;
+    expenseId: string;
+  }>();
   const router = useRouter();
   const { data: me } = useMe();
+  const formId = useId();
   const { data: expense, isLoading } = useExpense(expenseId);
   const { data: members } = useTeamMembers(teamId);
   const { data: settlements } = useExpenseSettlements(expenseId);
   const { data: history } = useExpenseHistory(expenseId);
   const { mutateAsync: correctExpense } = useCorrectExpense(teamId);
-  const { mutate: voidExpense } = useVoidExpense(teamId);
-  const { mutateAsync: confirmSettlement } = useConfirmSettlement();
-  const { mutateAsync: disputeSettlement } = useDisputeSettlement();
+  const { mutateAsync: voidExpense, isPending: isVoiding } =
+    useVoidExpense(teamId);
+  const { mutateAsync: confirmSettlement } = useConfirmSettlement(
+    teamId,
+    expenseId,
+  );
+  const { mutateAsync: disputeSettlement } = useDisputeSettlement(
+    teamId,
+    expenseId,
+  );
 
   const [showHistory, setShowHistory] = useState(false);
   const [showCorrectForm, setShowCorrectForm] = useState(false);
@@ -55,7 +80,12 @@ export default function ExpenseDetailPage() {
   const [correctionError, setCorrectionError] = useState("");
   const [actionError, setActionError] = useState("");
 
-  const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<CorrectionValues>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    reset,
+  } = useForm<CorrectionValues>({
     resolver: zodResolver(correctionSchema),
     defaultValues: { title: expense?.title ?? "" },
   });
@@ -77,15 +107,28 @@ export default function ExpenseDetailPage() {
       setShowCorrectForm(false);
       reset();
     } catch (err) {
-      setCorrectionError(err instanceof ApiRequestError ? err.error.message : "Failed to correct expense");
+      setCorrectionError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to correct expense",
+      );
     }
   }
 
   async function handleVoid() {
     if (!voidReason.trim()) return;
-    voidExpense({ expenseId, reason: voidReason });
-    setShowVoidConfirm(false);
-    router.push(ROUTES.team(teamId) as never);
+    setActionError("");
+    try {
+      await voidExpense({ expenseId, reason: voidReason.trim() });
+      setShowVoidConfirm(false);
+      router.push(ROUTES.team(teamId) as never);
+    } catch (err) {
+      setActionError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to void expense",
+      );
+    }
   }
 
   if (isLoading) {
@@ -98,7 +141,27 @@ export default function ExpenseDetailPage() {
     );
   }
 
-  if (!expense) return null;
+  if (!expense) {
+    return (
+      <div className="p-4 md:p-8 max-w-2xl">
+        <Card>
+          <CardContent className="flex flex-col items-start gap-4 py-8">
+            <div>
+              <h1 className="text-xl font-semibold">Expense not found</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                This expense may have been removed or you may not have access to
+                it.
+              </p>
+            </div>
+            <Button onClick={() => router.push(ROUTES.team(teamId) as never)}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to team
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const payer = memberMap.get(expense.paid_by);
 
@@ -106,8 +169,9 @@ export default function ExpenseDetailPage() {
     <div className="p-4 md:p-8 space-y-6 max-w-2xl">
       {/* Back */}
       <button
+        type="button"
         onClick={() => router.push(ROUTES.team(teamId) as never)}
-        className="flex items-center gap-1.5 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+        className="min-h-9 inline-flex items-center gap-1.5 px-2 -ml-2 rounded-md text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to team
@@ -119,14 +183,20 @@ export default function ExpenseDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold">{expense.title}</h1>
             {expense.is_void && <Badge variant="secondary">Void</Badge>}
-            {expense.version > 1 && <Badge variant="outline">v{expense.version}</Badge>}
+            {expense.version > 1 && (
+              <Badge variant="outline">v{expense.version}</Badge>
+            )}
           </div>
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             <DateDisplay iso={expense.expense_date} />
             {expense.note && ` · ${expense.note}`}
           </p>
         </div>
-        <CurrencyAmount amount={expense.amount} currency={expense.currency} className="text-xl font-bold flex-shrink-0" />
+        <CurrencyAmount
+          amount={expense.amount}
+          currency={expense.currency}
+          className="text-xl font-bold flex-shrink-0"
+        />
       </div>
 
       {/* Paid by */}
@@ -135,8 +205,10 @@ export default function ExpenseDetailPage() {
           <div className="flex items-center gap-3">
             <Avatar name={payer?.display_name ?? expense.paid_by} size="md" />
             <div>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">Paid by</p>
-              <p className="text-sm font-medium">{payer?.display_name ?? expense.paid_by}</p>
+              <p className="text-xs text-muted-foreground">Paid by</p>
+              <p className="text-sm font-medium">
+                {payer?.display_name ?? expense.paid_by}
+              </p>
             </div>
           </div>
         </CardContent>
@@ -153,9 +225,19 @@ export default function ExpenseDetailPage() {
               const member = memberMap.get(split.user_id);
               return (
                 <div key={split.id} className="flex items-center gap-3">
-                  <Avatar name={member?.display_name ?? split.user_id} size="sm" className="h-6 w-6 text-[0.55rem]" />
-                  <span className="flex-1 text-sm">{member?.display_name ?? split.user_id}</span>
-                  <CurrencyAmount amount={split.share_amount} currency={expense.currency} className="text-sm font-mono" />
+                  <Avatar
+                    name={member?.display_name ?? split.user_id}
+                    size="sm"
+                    className="h-6 w-6 text-xs"
+                  />
+                  <span className="flex-1 text-sm">
+                    {member?.display_name ?? split.user_id}
+                  </span>
+                  <CurrencyAmount
+                    amount={split.share_amount}
+                    currency={expense.currency}
+                    className="text-sm font-mono"
+                  />
                 </div>
               );
             })}
@@ -177,45 +259,85 @@ export default function ExpenseDetailPage() {
               defaultAmount={expense.amount}
               currency={expense.currency}
             >
-              <Button size="sm" variant="outline">Record settlement</Button>
+              <Button size="sm" variant="outline" className="min-h-9">
+                Record settlement
+              </Button>
             </SettlementSheet>
           )}
         </CardHeader>
         <CardContent>
           {!settlements?.length ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No settlements yet.</p>
+            <p className="text-sm text-muted-foreground">No settlements yet.</p>
           ) : (
             <div className="space-y-2">
               {settlements.map((s) => {
                 const payer = memberMap.get(s.payer_id);
                 const payee = memberMap.get(s.payee_id);
-                const canAct = s.status === "pending_confirmation" && s.payee_id === me?.id;
+                const canAct =
+                  s.status === "pending_confirmation" && s.payee_id === me?.id;
                 return (
-                  <div key={s.id} className={cn("p-3 rounded-lg border text-sm", SETTLEMENT_STATUS_COLORS[s.status] ?? "border-[hsl(var(--border))]")}>
+                  <div
+                    key={s.id}
+                    className={cn(
+                      "p-3 rounded-lg border text-sm",
+                      SETTLEMENT_STATUS_COLORS[s.status] ?? "border-border",
+                    )}
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <Avatar name={payer?.display_name ?? s.payer_id} size="sm" className="h-5 w-5 text-[0.5rem]" />
-                        <span className="truncate text-xs">{payer?.display_name ?? s.payer_id} → {payee?.display_name ?? s.payee_id}</span>
+                        <Avatar
+                          name={payer?.display_name ?? s.payer_id}
+                          size="sm"
+                          className="h-5 w-5 text-xs"
+                        />
+                        <span className="truncate text-xs">
+                          {payer?.display_name ?? s.payer_id} →{" "}
+                          {payee?.display_name ?? s.payee_id}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <CurrencyAmount amount={s.amount} currency={expense.currency} className="text-xs font-mono" />
-                        <Badge variant="outline" className="text-[0.65rem] py-0 capitalize">{s.status.replace("_", " ")}</Badge>
+                        <CurrencyAmount
+                          amount={s.amount}
+                          currency={expense.currency}
+                          className="text-xs font-mono"
+                        />
+                        <Badge
+                          variant="outline"
+                          className="text-xs py-0 capitalize"
+                        >
+                          {s.status.replace("_", " ")}
+                        </Badge>
                       </div>
                     </div>
                     {canAct && (
                       <div className="flex gap-2 mt-2">
                         <Button
                           size="sm"
-                          className="h-7 text-xs"
-                          onClick={async () => { try { await confirmSettlement(s.id); } catch { setActionError("Failed to confirm"); } }}
+                          className="min-h-9 text-xs"
+                          onClick={async () => {
+                            try {
+                              await confirmSettlement(s.id);
+                            } catch {
+                              setActionError("Failed to confirm");
+                            }
+                          }}
                         >
                           <Check className="h-3 w-3 mr-1" /> Confirm
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-7 text-xs"
-                          onClick={async () => { try { await disputeSettlement({ settlementId: s.id, reason: "" }); } catch { setActionError("Failed to dispute"); } }}
+                          className="min-h-9 text-xs"
+                          onClick={async () => {
+                            try {
+                              await disputeSettlement({
+                                settlementId: s.id,
+                                reason: "",
+                              });
+                            } catch {
+                              setActionError("Failed to dispute");
+                            }
+                          }}
                         >
                           <X className="h-3 w-3 mr-1" /> Dispute
                         </Button>
@@ -226,29 +348,50 @@ export default function ExpenseDetailPage() {
               })}
             </div>
           )}
-          {actionError && <p className="text-xs text-[hsl(var(--destructive))] mt-2">{actionError}</p>}
+          {actionError && (
+            <p className="text-xs text-destructive mt-2">{actionError}</p>
+          )}
         </CardContent>
       </Card>
 
       {/* Version history */}
       <Card>
         <button
+          type="button"
+          aria-expanded={showHistory}
+          aria-controls={`${formId}-history`}
           onClick={() => setShowHistory(!showHistory)}
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-[hsl(var(--muted)/0.5)] transition-colors rounded-t-xl"
+          className="min-h-9 w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors rounded-t-xl"
         >
-          <span>Version history {history?.expenseHistory.length ? `(${history.expenseHistory.length})` : ""}</span>
-          {showHistory ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          <span>
+            Version history{" "}
+            {history?.expenseHistory.length
+              ? `(${history.expenseHistory.length})`
+              : ""}
+          </span>
+          {showHistory ? (
+            <ChevronUp className="h-4 w-4" />
+          ) : (
+            <ChevronDown className="h-4 w-4" />
+          )}
         </button>
         {showHistory && (
-          <CardContent className="pt-0">
+          <CardContent id={`${formId}-history`} className="pt-0">
             {!history?.expenseHistory.length ? (
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">No corrections recorded.</p>
+              <p className="text-sm text-muted-foreground">
+                No corrections recorded.
+              </p>
             ) : (
               <div className="space-y-3">
                 {history.expenseHistory.map((v) => (
-                  <div key={v.id} className="border-l-2 border-[hsl(var(--border))] pl-3 space-y-1">
-                    <p className="text-xs font-medium">v{v.version} — {v.correctionReason ?? "Initial"}</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  <div
+                    key={v.id}
+                    className="border-l-2 border-border pl-3 space-y-1"
+                  >
+                    <p className="text-xs font-medium">
+                      v{v.version} — {v.correctionReason ?? "Initial"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
                       {formatDate(v.createdAt)}
                     </p>
                   </div>
@@ -262,10 +405,34 @@ export default function ExpenseDetailPage() {
       {/* Actions */}
       {!expense.is_void && (
         <div className="flex gap-3 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => { setShowCorrectForm(!showCorrectForm); setCorrectionAmount(expense.amount); reset({ title: expense.title, note: expense.note, correction_reason: "" }); }}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-9"
+            aria-expanded={showCorrectForm}
+            aria-controls={`${formId}-correction-form`}
+            onClick={() => {
+              setShowCorrectForm(!showCorrectForm);
+              setCorrectionAmount(expense.amount);
+              reset({
+                title: expense.title,
+                note: expense.note,
+                correction_reason: "",
+              });
+            }}
+          >
             Correct expense
           </Button>
-          <Button variant="outline" size="sm" className="text-[hsl(var(--destructive))] border-[hsl(var(--destructive)/0.3)] hover:bg-[hsl(var(--destructive)/0.05)]" onClick={() => setShowVoidConfirm(!showVoidConfirm)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-9 text-destructive border-destructive/30 hover:bg-destructive/5"
+            aria-expanded={showVoidConfirm}
+            aria-controls={`${formId}-void-form`}
+            onClick={() => setShowVoidConfirm(!showVoidConfirm)}
+          >
             Void expense
           </Button>
         </div>
@@ -273,36 +440,99 @@ export default function ExpenseDetailPage() {
 
       {/* Correction form */}
       {showCorrectForm && (
-        <Card>
+        <Card id={`${formId}-correction-form`}>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">Correct expense</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onCorrect)} className="space-y-3">
-              {correctionError && <p className="text-xs text-[hsl(var(--destructive))]">{correctionError}</p>}
+              {correctionError && (
+                <p className="text-xs text-destructive">{correctionError}</p>
+              )}
               <div className="space-y-1">
-                <Label className="text-xs">Title</Label>
-                <Input {...register("title")} className="h-8 text-sm" />
-                {errors.title && <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>}
+                <Label
+                  className="text-xs"
+                  htmlFor={`${formId}-correction-title`}
+                >
+                  Title
+                </Label>
+                <Input
+                  id={`${formId}-correction-title`}
+                  {...register("title")}
+                  className="h-9 text-sm"
+                />
+                {errors.title && (
+                  <p className="text-xs text-destructive">
+                    {errors.title.message}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Amount</Label>
-                <AmountInput value={correctionAmount} currency={expense.currency} onChange={setCorrectionAmount} />
+                <Label
+                  className="text-xs"
+                  htmlFor={`${formId}-correction-amount`}
+                >
+                  Amount
+                </Label>
+                <AmountInput
+                  id={`${formId}-correction-amount`}
+                  value={correctionAmount}
+                  currency={expense.currency}
+                  onChange={setCorrectionAmount}
+                />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Note</Label>
-                <Input {...register("note")} className="h-8 text-sm" placeholder="Optional note" />
+                <Label
+                  className="text-xs"
+                  htmlFor={`${formId}-correction-note`}
+                >
+                  Note
+                </Label>
+                <Input
+                  id={`${formId}-correction-note`}
+                  {...register("note")}
+                  className="h-9 text-sm"
+                  placeholder="Optional note"
+                />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Reason for correction <span className="text-[hsl(var(--destructive))]">*</span></Label>
-                <Input {...register("correction_reason")} className="h-8 text-sm" placeholder="Why is this being corrected?" />
-                {errors.correction_reason && <p className="text-xs text-[hsl(var(--destructive))]">{errors.correction_reason.message}</p>}
+                <Label
+                  className="text-xs"
+                  htmlFor={`${formId}-correction-reason`}
+                >
+                  Reason for correction{" "}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id={`${formId}-correction-reason`}
+                  {...register("correction_reason")}
+                  className="h-9 text-sm"
+                  placeholder="Why is this being corrected?"
+                />
+                {errors.correction_reason && (
+                  <p className="text-xs text-destructive">
+                    {errors.correction_reason.message}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
-                <Button type="submit" size="sm" disabled={isSubmitting}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="min-h-9"
+                  disabled={isSubmitting}
+                >
                   {isSubmitting ? "Saving…" : "Save correction"}
                 </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setShowCorrectForm(false)}>Cancel</Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-9"
+                  onClick={() => setShowCorrectForm(false)}
+                >
+                  Cancel
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -311,27 +541,53 @@ export default function ExpenseDetailPage() {
 
       {/* Void confirm */}
       {showVoidConfirm && (
-        <Card className="border-[hsl(var(--destructive)/0.3)]">
+        <Card id={`${formId}-void-form`} className="border-destructive/30">
           <CardContent className="pt-4 space-y-3">
-            <div className="flex items-center gap-2 text-[hsl(var(--destructive))]">
+            <div className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-4 w-4" />
               <p className="text-sm font-medium">Void this expense?</p>
             </div>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">This will mark the expense as void. The record is kept for audit purposes.</p>
+            <p className="text-xs text-muted-foreground">
+              This will mark the expense as void. The record is kept for audit
+              purposes.
+            </p>
             <div className="space-y-1">
-              <Label className="text-xs">Reason <span className="text-[hsl(var(--destructive))]">*</span></Label>
+              <Label className="text-xs" htmlFor={`${formId}-void-reason`}>
+                Reason <span className="text-destructive">*</span>
+              </Label>
               <Input
+                id={`${formId}-void-reason`}
                 placeholder="Why is this being voided?"
                 value={voidReason}
                 onChange={(e) => setVoidReason(e.target.value)}
-                className="h-8 text-sm"
+                className="h-9 text-sm"
               />
             </div>
+            {actionError && (
+              <p role="alert" className="text-xs text-destructive">
+                {actionError}
+              </p>
+            )}
             <div className="flex gap-2">
-              <Button variant="destructive" size="sm" onClick={handleVoid} disabled={!voidReason.trim()}>
-                Confirm void
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="min-h-9"
+                onClick={handleVoid}
+                disabled={!voidReason.trim() || isVoiding}
+              >
+                {isVoiding ? "Voiding…" : "Confirm void"}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setShowVoidConfirm(false)}>Cancel</Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-9"
+                onClick={() => setShowVoidConfirm(false)}
+              >
+                Cancel
+              </Button>
             </div>
           </CardContent>
         </Card>

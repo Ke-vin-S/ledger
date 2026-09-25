@@ -20,7 +20,8 @@ export function parseAmount(display: string): number {
 }
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso;
+  return new Date(normalized).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",

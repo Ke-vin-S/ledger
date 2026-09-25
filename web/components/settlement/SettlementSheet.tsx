@@ -1,6 +1,5 @@
 "use client";
-
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +9,13 @@ import { Avatar } from "@/components/shared/Avatar";
 import { useRecordSettlement } from "@/hooks/useSettlements";
 import { ApiRequestError } from "@/lib/api";
 import { SETTLEMENT_METHODS } from "@/constants/config";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { SettlementMethod } from "@/types/settlement.types";
 
 type Method = SettlementMethod;
@@ -26,8 +31,18 @@ type Props = {
   children: React.ReactNode;
 };
 
-export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName, defaultAmount, currency, children }: Props) {
+export function SettlementSheet({
+  teamId,
+  expenseId,
+  payerId,
+  payeeId,
+  payeeName,
+  defaultAmount,
+  currency,
+  children,
+}: Props) {
   const [open, setOpen] = useState(false);
+  const formId = useId();
   const [amount, setAmount] = useState(defaultAmount);
   const [method, setMethod] = useState<Method>("cash");
   const [methodNote, setMethodNote] = useState("");
@@ -37,7 +52,10 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
   const { mutateAsync, isPending } = useRecordSettlement(teamId, expenseId);
 
   async function handleSubmit() {
-    if (!amount) { setError("Amount is required"); return; }
+    if (!amount) {
+      setError("Amount is required");
+      return;
+    }
     setError("");
     try {
       await mutateAsync({
@@ -50,7 +68,11 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
       });
       setOpen(false);
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.error.message : "Failed to record settlement");
+      setError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to record settlement",
+      );
     }
   }
 
@@ -59,39 +81,57 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>{children}</SheetTrigger>
-      <SheetContent title="Record settlement" description={`Settle with ${payeeName}`}>
+      <SheetContent
+        title="Record settlement"
+        description={`Settle with ${payeeName}`}
+      >
         <div className="space-y-5">
           {/* Counterparty */}
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-[hsl(var(--muted)/0.5)]">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
             <Avatar name={payeeName} size="md" />
             <div>
               <p className="text-sm font-medium">{payeeName}</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">Marking as settled</p>
+              <p className="text-xs text-muted-foreground">
+                Marking as settled
+              </p>
             </div>
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] text-sm">
+            <div
+              role="alert"
+              className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+            >
               {error}
             </div>
           )}
 
           {/* Amount */}
           <div className="space-y-1.5">
-            <Label>Amount</Label>
-            <AmountInput value={amount} currency={currency} onChange={setAmount} />
+            <Label htmlFor={`${formId}-amount`}>Amount</Label>
+            <AmountInput
+              id={`${formId}-amount`}
+              value={amount}
+              currency={currency}
+              onChange={setAmount}
+            />
           </div>
 
           {/* Method */}
           <div className="space-y-1.5">
-            <Label>Payment method</Label>
-            <Select value={method} onValueChange={(v) => setMethod(v as Method)}>
-              <SelectTrigger>
+            <Label htmlFor={`${formId}-method`}>Payment method</Label>
+            <Select
+              value={method}
+              onValueChange={(v) => setMethod(v as Method)}
+            >
+              <SelectTrigger id={`${formId}-method`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {SETTLEMENT_METHODS.map(({ value, label }) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -100,9 +140,12 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
           {/* Method note (UPI/bank) */}
           {needsNote && (
             <div className="space-y-1.5">
-              <Label>Reference number</Label>
+              <Label htmlFor={`${formId}-reference`}>Reference number</Label>
               <Input
-                placeholder={method === "upi" ? "UPI transaction ID" : "Bank reference"}
+                id={`${formId}-reference`}
+                placeholder={
+                  method === "upi" ? "UPI transaction ID" : "Bank reference"
+                }
                 value={methodNote}
                 onChange={(e) => setMethodNote(e.target.value)}
               />
@@ -111,18 +154,34 @@ export function SettlementSheet({ teamId, expenseId, payerId, payeeId, payeeName
 
           {/* Date */}
           <div className="space-y-1.5">
-            <Label>Date</Label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Label htmlFor={`${formId}-date`}>Date</Label>
+            <Input
+              id={`${formId}-date`}
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
           </div>
 
           <div className="flex gap-3 pt-2">
-            <Button onClick={handleSubmit} disabled={isPending} className="flex-1">
+            <Button
+              type="button"
+              onClick={handleSubmit}
+              disabled={isPending}
+              className="flex-1"
+            >
               {isPending ? "Recording…" : "Record settlement"}
             </Button>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
           </div>
 
-          <p className="text-xs text-[hsl(var(--muted-foreground))] text-center">
+          <p className="text-xs text-muted-foreground text-center">
             The other party will need to confirm this settlement.
           </p>
         </div>

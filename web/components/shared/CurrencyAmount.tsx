@@ -13,9 +13,11 @@ export function CurrencyAmount({ amount, currency = "LKR", signed = false, class
 
   return (
     <span
+      data-amount
       className={cn(
-        signed && isPositive && "text-[hsl(var(--positive))]",
-        signed && isNegative && "text-[hsl(var(--negative))]",
+        "tabular-nums",
+        signed && isPositive && "text-positive",
+        signed && isNegative && "text-negative",
         className,
       )}
     >

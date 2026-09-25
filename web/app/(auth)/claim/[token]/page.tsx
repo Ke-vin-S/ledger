@@ -34,10 +34,10 @@ export default function ClaimPage() {
     return (
       <div className="text-center space-y-4">
         <div className="flex justify-center">
-          <AlertCircle className="h-12 w-12 text-[hsl(var(--destructive))]" />
+          <AlertCircle className="h-12 w-12 text-destructive" />
         </div>
         <h1 className="text-2xl font-bold">Claim Failed</h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm">{error}</p>
+        <p className="text-muted-foreground text-sm">{error}</p>
         <a href={ROUTES.login} className="underline text-sm">
           Go to login
         </a>
@@ -48,13 +48,13 @@ export default function ClaimPage() {
   return (
     <div className="text-center space-y-6">
       <div className="flex justify-center">
-        <div className="h-16 w-16 rounded-full bg-[hsl(var(--primary)/0.1)] flex items-center justify-center">
-          <UserCheck className="h-8 w-8 text-[hsl(var(--primary))]" />
+        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+          <UserCheck className="h-8 w-8 text-primary" />
         </div>
       </div>
       <div className="space-y-2">
         <h1 className="text-2xl font-bold">Claim your account</h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm max-w-sm mx-auto">
+        <p className="text-muted-foreground text-sm max-w-sm mx-auto">
           This will merge the anonymous placeholder profile into your account, transferring all associated expenses, splits, and balances.
         </p>
       </div>
@@ -68,7 +68,7 @@ export default function ClaimPage() {
           "Confirm & claim"
         )}
       </Button>
-      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+      <p className="text-xs text-muted-foreground">
         You must be logged in. This action cannot be undone.
       </p>
     </div>

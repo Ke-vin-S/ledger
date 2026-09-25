@@ -39,10 +39,10 @@ export default function AcceptInvitationPage() {
     return (
       <div className="text-center space-y-4">
         <div className="flex justify-center">
-          <CheckCircle2 className="h-12 w-12 text-[hsl(var(--primary))]" />
+          <CheckCircle2 className="h-12 w-12 text-primary" />
         </div>
         <h1 className="text-2xl font-bold">You&apos;re in!</h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm">Redirecting to the team…</p>
+        <p className="text-muted-foreground text-sm">Redirecting to the team…</p>
       </div>
     );
   }
@@ -51,10 +51,10 @@ export default function AcceptInvitationPage() {
     return (
       <div className="text-center space-y-4">
         <div className="flex justify-center">
-          <AlertCircle className="h-12 w-12 text-[hsl(var(--destructive))]" />
+          <AlertCircle className="h-12 w-12 text-destructive" />
         </div>
         <h1 className="text-2xl font-bold">Invitation Invalid</h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm">{error}</p>
+        <p className="text-muted-foreground text-sm">{error}</p>
         <a href={ROUTES.dashboard} className="underline text-sm">Go to dashboard</a>
       </div>
     );
@@ -63,13 +63,13 @@ export default function AcceptInvitationPage() {
   return (
     <div className="text-center space-y-6">
       <div className="flex justify-center">
-        <div className="h-16 w-16 rounded-full bg-[hsl(var(--primary)/0.1)] flex items-center justify-center">
-          <Users className="h-8 w-8 text-[hsl(var(--primary))]" />
+        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+          <Users className="h-8 w-8 text-primary" />
         </div>
       </div>
       <div className="space-y-2">
         <h1 className="text-2xl font-bold">You&apos;ve been invited</h1>
-        <p className="text-[hsl(var(--muted-foreground))] text-sm max-w-sm mx-auto">
+        <p className="text-muted-foreground text-sm max-w-sm mx-auto">
           Accept this invitation to join the team and start splitting expenses together.
           You&apos;ll be asked to sign in or create an account if you haven&apos;t already.
         </p>
