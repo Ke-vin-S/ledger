@@ -4,6 +4,8 @@ export const API_ENDPOINTS = {
     register: "/auth/register",
     refresh: "/auth/refresh",
     logout: "/auth/logout",
+	passwordResetRequest: "/auth/password/reset-request",
+	passwordReset: "/auth/password/reset",
   },
   users: {
     me: "/users/me",
@@ -28,6 +30,7 @@ export const API_ENDPOINTS = {
     list: "/expenses",
     detail: (expenseId: string) => `/expenses/${expenseId}`,
     settlements: (expenseId: string) => `/expenses/${expenseId}/settlements`,
+	void: (expenseId: string) => `/expenses/${expenseId}/void`,
   },
   settlements: {
     confirm: (settlementId: string) => `/settlements/${settlementId}/confirm`,
@@ -48,7 +51,6 @@ export const API_ENDPOINTS = {
     readAll: "/notifications/read-all",
     dismiss: (id: string) => `/notifications/${id}`,
   },
-  invite: (token: string) => `/invite/${token}`,
   acceptInvitation: (token: string) => `/invitations/${token}/accept`,
   balances: "/balances",
 } as const;

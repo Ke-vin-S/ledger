@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { api, ApiRequestError } from "./api";
+import { api, ApiRequestError, resetApiStateForTests } from "./api";
 import { setAccessToken, getAccessToken } from "./auth";
 
 // Minimal Response-like object matching what lib/api.ts reads (ok, status, json()).
@@ -14,6 +14,7 @@ function res(status: number, body?: unknown) {
 describe("api request wrapper", () => {
   beforeEach(() => {
     setAccessToken(null);
+    resetApiStateForTests();
     vi.restoreAllMocks();
   });
 

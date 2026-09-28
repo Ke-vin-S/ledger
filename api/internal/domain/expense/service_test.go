@@ -3,6 +3,7 @@ package expense_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,11 +16,13 @@ import (
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
 type fakeExpenseRepo struct {
-	expense  *expense.Expense
-	splits   []expense.ExpenseSplit
-	findErr  error
-	createErr error
-	voidErr  error
+	expense          *expense.Expense
+	splits           []expense.ExpenseSplit
+	findErr          error
+	createErr        error
+	voidErr          error
+	correctedBy      uuid.UUID
+	correctionReason *string
 }
 
 func (r *fakeExpenseRepo) Create(_ context.Context, e *expense.Expense, s []expense.ExpenseSplit) (*expense.Expense, []expense.ExpenseSplit, error) {
@@ -61,9 +64,11 @@ func (r *fakeExpenseRepo) ListForUser(_ context.Context, _ uuid.UUID, _ bool) ([
 	return []*expense.Expense{r.expense}, nil
 }
 
-func (r *fakeExpenseRepo) SaveCorrection(_ context.Context, _ uuid.UUID, _ any, newE *expense.Expense, newS []expense.ExpenseSplit) (*expense.Expense, []expense.ExpenseSplit, error) {
+func (r *fakeExpenseRepo) SaveCorrection(_ context.Context, _ uuid.UUID, _ any, newE *expense.Expense, newS []expense.ExpenseSplit, correctedBy uuid.UUID, correctionReason *string) (*expense.Expense, []expense.ExpenseSplit, error) {
 	r.expense = newE
 	r.splits = newS
+	r.correctedBy = correctedBy
+	r.correctionReason = correctionReason
 	return newE, newS, nil
 }
 
@@ -85,25 +90,46 @@ func (r *fakeExpenseRepo) UpdateReceiptURL(_ context.Context, _ uuid.UUID, url s
 	return nil
 }
 
-// fakeTeamGateway lets tests control what role/status the actor has.
 type fakeTeamGateway struct {
-	role   string
-	status string
-	err    error
+	role        string
+	status      string
+	err         error
+	memberships map[uuid.UUID]struct {
+		role   string
+		status string
+		err    error
+	}
 }
 
-func (g *fakeTeamGateway) GetMembership(_ context.Context, _, _ uuid.UUID) (string, string, error) {
+func (g *fakeTeamGateway) GetMembership(_ context.Context, _ uuid.UUID, userID uuid.UUID) (string, string, error) {
+	if g.memberships != nil {
+		membership, ok := g.memberships[userID]
+		if !ok {
+			return "", "", errors.New("not a member")
+		}
+		return membership.role, membership.status, membership.err
+	}
 	return g.role, g.status, g.err
 }
 
-type fakePresigner struct{ url string }
+type fakePresigner struct {
+	url     string
+	key     string
+	content string
+}
 
-func (p *fakePresigner) PresignPut(_ context.Context, _, _ string, _ time.Duration) (string, error) {
+func (p *fakePresigner) PresignPut(_ context.Context, key, contentType string, _ time.Duration) (string, error) {
+	p.key = key
+	p.content = contentType
 	return p.url, nil
 }
 
 func newSvc(repo expense.Repository, gw expense.TeamGateway) *expense.Service {
-	return expense.NewService(repo, gw, audit.NopLogger(), &fakePresigner{url: "https://s3.example.com/upload"})
+	return newSvcWithPresigner(repo, gw, &fakePresigner{url: "https://s3.example.com/upload"})
+}
+
+func newSvcWithPresigner(repo expense.Repository, gw expense.TeamGateway, presigner expense.Presigner) *expense.Service {
+	return expense.NewService(repo, gw, audit.NopLogger(), presigner)
 }
 
 // ── CreateExpense — personal ───────────────────────────────────────────────────
@@ -265,6 +291,77 @@ func TestCreateExpense_Team_MissingTeamID_Error(t *testing.T) {
 	}
 }
 
+func TestCreateExpense_Team_RejectsNonMemberPayerAndParticipant(t *testing.T) {
+	actor, outsider := uuid.New(), uuid.New()
+	teamID := uuid.New()
+	gw := &fakeTeamGateway{
+		role:   "owner",
+		status: "active",
+		memberships: map[uuid.UUID]struct {
+			role   string
+			status string
+			err    error
+		}{actor: {role: "owner", status: "active"}},
+	}
+	svc := newSvc(&fakeExpenseRepo{}, gw)
+	input := expense.CreateInput{
+		Scope: expense.ScopeTeam, TeamID: &teamID, Title: "Dinner", Amount: 1000,
+		Currency: "LKR", PaidBy: actor, ExpenseDate: time.Now(), SplitMethod: ptr(expense.MethodEqual),
+		Splits: []expense.SplitInput{{UserID: actor}, {UserID: outsider}},
+	}
+
+	_, err := svc.CreateExpense(context.Background(), actor, input)
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("non-member participant: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestCreateExpense_Team_AdminCanPayForActiveMember(t *testing.T) {
+	admin, payer := uuid.New(), uuid.New()
+	teamID := uuid.New()
+	gw := &fakeTeamGateway{memberships: map[uuid.UUID]struct {
+		role   string
+		status string
+		err    error
+	}{
+		admin: {role: "admin", status: "active"},
+		payer: {role: "member", status: "active"},
+	}}
+	svc := newSvc(&fakeExpenseRepo{}, gw)
+
+	_, err := svc.CreateExpense(context.Background(), admin, expense.CreateInput{
+		Scope: expense.ScopeTeam, TeamID: &teamID, Title: "Dinner", Amount: 1000,
+		Currency: "LKR", PaidBy: payer, ExpenseDate: time.Now(), SplitMethod: ptr(expense.MethodEqual),
+		Splits: []expense.SplitInput{{UserID: payer}},
+	})
+	if err != nil {
+		t.Fatalf("admin payment for active member failed: %v", err)
+	}
+}
+
+func TestCreateExpense_Team_MemberCannotPayForAnotherUser(t *testing.T) {
+	actor, payer := uuid.New(), uuid.New()
+	teamID := uuid.New()
+	gw := &fakeTeamGateway{memberships: map[uuid.UUID]struct {
+		role   string
+		status string
+		err    error
+	}{
+		actor: {role: "member", status: "active"},
+		payer: {role: "member", status: "active"},
+	}}
+	svc := newSvc(&fakeExpenseRepo{}, gw)
+
+	_, err := svc.CreateExpense(context.Background(), actor, expense.CreateInput{
+		Scope: expense.ScopeTeam, TeamID: &teamID, Title: "Dinner", Amount: 1000,
+		Currency: "LKR", PaidBy: payer, ExpenseDate: time.Now(), SplitMethod: ptr(expense.MethodEqual),
+		Splits: []expense.SplitInput{{UserID: payer}},
+	})
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
 // ── CreateExpense — direct ────────────────────────────────────────────────────
 
 func TestCreateExpense_Direct_CreatesSingleBorrowerSplit(t *testing.T) {
@@ -312,6 +409,66 @@ func TestCreateExpense_Direct_MissingBorrower_Error(t *testing.T) {
 	_, err := svc.CreateExpense(context.Background(), actor, input)
 	if !errors.Is(err, expense.ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCreateExpense_Direct_RejectsSelfBorrower(t *testing.T) {
+	actor := uuid.New()
+	svc := newSvc(&fakeExpenseRepo{}, nil)
+	_, err := svc.CreateExpense(context.Background(), actor, expense.CreateInput{
+		Scope: expense.ScopeDirect, Title: "Loan", Amount: 500, Currency: "LKR",
+		PaidBy: actor, BorrowerID: &actor, ExpenseDate: time.Now(),
+	})
+	if !errors.Is(err, expense.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestGetExpense_PersonalByAnotherUser_Forbidden(t *testing.T) {
+	owner := uuid.New()
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: owner}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, nil)
+
+	_, err := svc.GetExpense(context.Background(), actor, exp.ID)
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
+func TestGetExpense_DirectByBorrower_Succeeds(t *testing.T) {
+	payer := uuid.New()
+	borrower := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeDirect, PaidBy: payer}
+	repo := &fakeExpenseRepo{
+		expense: exp,
+		splits:  []expense.ExpenseSplit{{ExpenseID: exp.ID, UserID: borrower}},
+	}
+	svc := newSvc(repo, nil)
+
+	result, err := svc.GetExpense(context.Background(), borrower, exp.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Expense.ID != exp.ID {
+		t.Fatalf("expense ID = %v, want %v", result.Expense.ID, exp.ID)
+	}
+}
+
+func TestGetExpense_DirectByUnrelatedUser_Forbidden(t *testing.T) {
+	payer := uuid.New()
+	borrower := uuid.New()
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeDirect, PaidBy: payer}
+	repo := &fakeExpenseRepo{
+		expense: exp,
+		splits:  []expense.ExpenseSplit{{ExpenseID: exp.ID, UserID: borrower}},
+	}
+	svc := newSvc(repo, nil)
+
+	_, err := svc.GetExpense(context.Background(), actor, exp.ID)
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
 	}
 }
 
@@ -456,6 +613,64 @@ func TestCorrectExpense_TeamExpense_InvalidSplitSum_Error(t *testing.T) {
 	}
 }
 
+func TestCorrectExpense_AmountOnly_RecomputesEqualSplits(t *testing.T) {
+	actor, other := uuid.New(), uuid.New()
+	teamID := uuid.New()
+	method := expense.MethodEqual
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeTeam, TeamID: &teamID, PaidBy: actor, Amount: 1000, Currency: "LKR", Version: 1, SplitMethod: &method}
+	repo := &fakeExpenseRepo{expense: exp, splits: []expense.ExpenseSplit{{UserID: actor, ShareAmount: 500, Version: 1}, {UserID: other, ShareAmount: 500, Version: 1}}}
+	svc := newSvc(repo, &fakeTeamGateway{role: "owner", status: "active"})
+
+	result, err := svc.CorrectExpense(context.Background(), actor, exp.ID, expense.CorrectInput{Title: "Dinner", Amount: 1001, Currency: "LKR", PaidBy: actor, ExpenseDate: time.Now()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var total int64
+	for _, split := range result.Splits {
+		total += split.ShareAmount
+	}
+	if total != 1001 {
+		t.Fatalf("split total = %d, want 1001", total)
+	}
+	if result.Splits[0].ShareAmount != 501 || result.Splits[1].ShareAmount != 500 {
+		t.Fatalf("unexpected recomputed splits: %+v", result.Splits)
+	}
+}
+
+func TestCorrectExpense_InvalidAmountOrCurrency(t *testing.T) {
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: actor, Amount: 500, Currency: "LKR", Version: 1}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, nil)
+
+	_, err := svc.CorrectExpense(context.Background(), actor, exp.ID, expense.CorrectInput{Amount: 0, Currency: "LKR", PaidBy: actor})
+	if !errors.Is(err, expense.ErrInvalidInput) {
+		t.Fatalf("zero amount: want ErrInvalidInput, got %v", err)
+	}
+	_, err = svc.CorrectExpense(context.Background(), actor, exp.ID, expense.CorrectInput{Amount: 100, Currency: "lkr", PaidBy: actor})
+	if !errors.Is(err, expense.ErrInvalidInput) {
+		t.Fatalf("invalid currency: want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCorrectExpense_PersistsActorAndReason(t *testing.T) {
+	actor, creator := uuid.New(), uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: actor, CreatedBy: creator, Amount: 500, Currency: "LKR", Version: 1}
+	repo := &fakeExpenseRepo{expense: exp}
+	svc := newSvc(repo, nil)
+	reason := "corrected amount"
+
+	_, err := svc.CorrectExpense(context.Background(), actor, exp.ID, expense.CorrectInput{Amount: 600, Currency: "LKR", PaidBy: actor, CorrectionReason: &reason})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.correctedBy != actor {
+		t.Fatalf("corrected by = %v, want actor %v", repo.correctedBy, actor)
+	}
+	if repo.correctionReason == nil || *repo.correctionReason != reason {
+		t.Fatalf("correction reason = %v, want %q", repo.correctionReason, reason)
+	}
+}
+
 // ── GetReceiptUploadURL ───────────────────────────────────────────────────────
 
 func TestGetReceiptUploadURL_ByPaidBy_ReturnsURL(t *testing.T) {
@@ -477,6 +692,92 @@ func TestGetReceiptUploadURL_ByPaidBy_ReturnsURL(t *testing.T) {
 	}
 	if key == "" {
 		t.Error("key must not be empty")
+	}
+}
+
+func TestGetReceiptUploadURL_DirectBorrowerForbidden(t *testing.T) {
+	payer := uuid.New()
+	borrower := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeDirect, PaidBy: payer}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, nil)
+
+	_, _, err := svc.GetReceiptUploadURL(context.Background(), borrower, exp.ID, "image/jpeg")
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
+func TestGetReceiptUploadURL_TeamAdminAllowed(t *testing.T) {
+	payer := uuid.New()
+	admin := uuid.New()
+	teamID := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeTeam, TeamID: &teamID, PaidBy: payer}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, &fakeTeamGateway{role: "admin", status: "active"})
+
+	if _, _, err := svc.GetReceiptUploadURL(context.Background(), admin, exp.ID, "image/png"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetReceiptUploadURL_RejectsUnsupportedContentType(t *testing.T) {
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: actor}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, nil)
+
+	_, _, err := svc.GetReceiptUploadURL(context.Background(), actor, exp.ID, "application/pdf")
+	if !errors.Is(err, expense.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestGetReceiptUploadURL_UsesUniqueKey(t *testing.T) {
+	actor := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopePersonal, PaidBy: actor}
+	repo := &fakeExpenseRepo{expense: exp}
+	presigner := &fakePresigner{url: "https://s3.example.com/upload"}
+	svc := newSvcWithPresigner(repo, nil, presigner)
+
+	_, firstKey, err := svc.GetReceiptUploadURL(context.Background(), actor, exp.ID, "image/jpeg")
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	_, secondKey, err := svc.GetReceiptUploadURL(context.Background(), actor, exp.ID, "image/jpeg")
+	if err != nil {
+		t.Fatalf("second upload: %v", err)
+	}
+	if firstKey == secondKey {
+		t.Fatalf("receipt keys must be unique, both were %q", firstKey)
+	}
+	if firstKey == fmt.Sprintf("receipts/%s", exp.ID) {
+		t.Fatalf("receipt key must include a unique object ID: %q", firstKey)
+	}
+}
+
+func TestFinalizeReceipt_DirectBorrowerForbidden(t *testing.T) {
+	payer := uuid.New()
+	borrower := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeDirect, PaidBy: payer}
+	repo := &fakeExpenseRepo{expense: exp}
+	svc := newSvc(repo, nil)
+
+	_, err := svc.FinalizeReceipt(context.Background(), borrower, exp.ID, "https://cdn.example/receipt.jpg")
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+	if exp.ReceiptURL != nil {
+		t.Fatal("forbidden finalize changed receipt URL")
+	}
+}
+
+func TestGetExpense_TeamRequiresActiveMembership(t *testing.T) {
+	actor := uuid.New()
+	teamID := uuid.New()
+	exp := &expense.Expense{ID: uuid.New(), Scope: expense.ScopeTeam, TeamID: &teamID, PaidBy: actor}
+	svc := newSvc(&fakeExpenseRepo{expense: exp}, &fakeTeamGateway{err: errors.New("not a member")})
+
+	_, err := svc.GetExpense(context.Background(), actor, exp.ID)
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
 	}
 }
 

@@ -2,7 +2,7 @@
 
 import { useTeamActivityFeed } from "@/hooks/useGraphQL";
 import { DateDisplay } from "@/components/shared/DateDisplay";
-import { Skeleton } from "@/components/shared/Skeleton";
+import { QueryBoundary } from "@/components/query-boundary";
 
 type Props = { teamId: string };
 
@@ -20,47 +20,40 @@ const actionLabel: Record<string, string> = {
 };
 
 export function ActivityFeed({ teamId }: Props) {
-  const { data, isLoading } = useTeamActivityFeed(teamId, { limit: 20 });
-  const items = data?.teamActivityFeed.items ?? [];
-
-  if (isLoading) {
-    return (
-      <div className="space-y-3">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-10" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!items.length) {
-    return (
-      <p className="text-sm text-[hsl(var(--muted-foreground))] py-4">
-        No activity yet.
-      </p>
-    );
-  }
+  const query = useTeamActivityFeed(teamId, { limit: 20 });
 
   return (
-    <ol className="space-y-3">
-      {items.map((item) => (
-        <li key={item.id} className="flex items-start gap-3 text-sm">
-          <div className="flex-shrink-0 h-2 w-2 rounded-full bg-[hsl(var(--muted-foreground))] mt-2" />
-          <div className="flex-1 min-w-0">
-            <p className="leading-snug">
-              {item.actorId ? (
-                <span className="font-medium">{item.actorId}</span>
-              ) : (
-                <span className="text-[hsl(var(--muted-foreground))]">System</span>
-              )}{" "}
-              {actionLabel[item.action] ?? item.action}
-            </p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
-              <DateDisplay iso={item.createdAt} withTime />
-            </p>
-          </div>
-        </li>
-      ))}
-    </ol>
+    <QueryBoundary
+      {...query}
+      isEmpty={(data) => data.teamActivityFeed.items.length === 0}
+      emptyMessage="Activity will appear here as your team gets moving."
+      className="min-h-40"
+    >
+      {(data) => (
+        <ol className="space-y-4" aria-live="polite">
+          {data.teamActivityFeed.items.map((item) => (
+            <li key={item.id} className="flex items-start gap-3 text-sm">
+              <div
+                className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary"
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="leading-snug">
+                  {item.actorId ? (
+                    <span className="font-medium">{item.actorId}</span>
+                  ) : (
+                    <span className="text-muted-foreground">System</span>
+                  )}{" "}
+                  {actionLabel[item.action] ?? item.action}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  <DateDisplay iso={item.createdAt} withTime />
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </QueryBoundary>
   );
 }

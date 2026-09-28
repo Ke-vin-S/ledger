@@ -1,6 +1,7 @@
 package flag
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -13,11 +14,17 @@ const (
 )
 
 var (
-	ErrNotFound     = errors.New("flag not found")
-	ErrForbidden    = errors.New("insufficient permission")
-	ErrInvalidInput = errors.New("invalid input")
+	ErrNotFound        = errors.New("flag not found")
+	ErrForbidden       = errors.New("insufficient permission")
+	ErrInvalidInput    = errors.New("invalid input")
 	ErrAlreadyResolved = errors.New("flag is already resolved")
 )
+
+// ExpenseAccessChecker centralizes expense authorization for flag operations.
+type ExpenseAccessChecker interface {
+	CanRead(ctx context.Context, actorID, expenseID uuid.UUID) error
+	CanWrite(ctx context.Context, actorID, expenseID uuid.UUID) error
+}
 
 type Flag struct {
 	ID             uuid.UUID  `json:"id"`

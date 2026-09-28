@@ -30,8 +30,19 @@ async function parseError(res: Response): Promise<ApiRequestError> {
 
 // Only one refresh in-flight at a time — prevents race when multiple 401s fire simultaneously.
 let refreshPromise: Promise<boolean> | null = null;
+let hasRedirected = false;
+let refreshFailedUntil = 0;
+
+async function redirectToLogin(): Promise<void> {
+  if (hasRedirected || typeof window === "undefined") return;
+  hasRedirected = true;
+  const here = window.location.pathname + window.location.search;
+  const next = here && !here.startsWith("/login") ? `?next=${encodeURIComponent(here)}` : "";
+  window.location.href = `/login${next}`;
+}
 
 async function refreshTokens(): Promise<boolean> {
+  if (Date.now() < refreshFailedUntil) return false;
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
@@ -51,7 +62,9 @@ async function refreshTokens(): Promise<boolean> {
     }
   })();
 
-  return refreshPromise;
+  const refreshed = await refreshPromise;
+  if (!refreshed) refreshFailedUntil = Date.now() + 2000;
+  return refreshed;
 }
 
 async function request<T>(
@@ -72,23 +85,17 @@ async function request<T>(
     credentials: "include",
   });
 
-  if (res.status === 401 && retry) {
-    const refreshed = await refreshTokens();
-    if (refreshed) return request<T>(path, init, false);
-    // Refresh failed — redirect to login, preserving where the user was so they
-    // return after signing in (e.g. an invitation accept page).
-    if (typeof window !== "undefined") {
-      const here = window.location.pathname + window.location.search;
-      const next = here && here !== "/login" ? `?next=${encodeURIComponent(here)}` : "";
-      window.location.href = `/login${next}`; // avoid circular import — ROUTES not used here
+  if (res.status === 401) {
+    if (retry) {
+      const refreshed = await refreshTokens();
+      if (refreshed) return request<T>(path, init, false);
     }
+    await redirectToLogin();
     throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
   }
 
   if (!res.ok) throw await parseError(res);
-
   if (res.status === 204) return undefined as T;
-  // All backend responses are enveloped as { data: T, meta: { ... } }. Unwrap data.
   const body = await res.json();
   return (body.data !== undefined ? body.data : body) as T;
 }
@@ -108,11 +115,11 @@ export const api = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
 
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, {
-      method: "PUT",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }),
-
   delete: <T = void>(path: string) => request<T>(path, { method: "DELETE" }),
 };
+
+export function resetApiStateForTests(): void {
+  refreshPromise = null;
+  refreshFailedUntil = 0;
+  hasRedirected = false;
+}

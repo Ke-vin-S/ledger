@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -78,7 +79,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 	var nextCursor string
 	if hasMore && len(items) > 0 {
-		nextCursor = items[len(items)-1].CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z")
+		nextCursor = encodeNotificationCursor(items[len(items)-1])
 	}
 	handler.JSONPaginated(w, r, items, nextCursor, hasMore)
 }
@@ -176,4 +177,8 @@ func parseUUID(w http.ResponseWriter, r *http.Request, s string) (uuid.UUID, boo
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+func encodeNotificationCursor(item *notification.Notification) string {
+	return item.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + item.ID.String()
 }

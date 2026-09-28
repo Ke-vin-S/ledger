@@ -1,30 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Link from "next/link";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import Link from "next/link";
+import { ArrowDownLeft, ArrowUpRight, Plus } from "lucide-react";
 import { useLoans, useCreateLoan } from "@/hooks/useLoans";
 import { useMyBalances } from "@/hooks/useSettlements";
 import { DebtBar } from "@/components/settlement/DebtBar";
 import { CurrencyAmount } from "@/components/shared/CurrencyAmount";
 import { DateDisplay } from "@/components/shared/DateDisplay";
 import { Avatar } from "@/components/shared/Avatar";
-import { Skeleton } from "@/components/shared/Skeleton";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { QueryBoundary } from "@/components/query-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AmountInput } from "@/components/expense/AmountInput";
-
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/toast";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CURRENCY_CODES, LOAN_STATUS_BADGE_SHORT } from "@/constants/config";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ROUTES } from "@/constants/routes";
+import type { Loan } from "@/types/loan.types";
+import type { UseQueryResult } from "@tanstack/react-query";
 
 const loanSchema = z.object({
   direction: z.enum(["lent", "borrowed"]),
@@ -38,11 +47,23 @@ type LoanFormValues = z.infer<typeof loanSchema>;
 
 function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
   const { mutateAsync, isPending } = useCreateLoan();
+  const { toast } = useToast();
   const [amount, setAmount] = useState(0);
   const [currency, setCurrency] = useState("LKR");
   const [serverError, setServerError] = useState("");
-
-  const { register, handleSubmit, setValue, watch, control, formState: { errors } } = useForm<LoanFormValues>({
+  const fieldId = useId();
+  const directionErrorId = `${fieldId}-direction-error`;
+  const counterpartyErrorId = `${fieldId}-counterparty-error`;
+  const dateErrorId = `${fieldId}-date-error`;
+  const amountErrorId = `${fieldId}-amount-error`;
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    control,
+    formState: { errors },
+  } = useForm<LoanFormValues>({
     resolver: zodResolver(loanSchema),
     defaultValues: {
       direction: "lent",
@@ -50,7 +71,6 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
       loan_date: new Date().toISOString().split("T")[0],
     },
   });
-
   const selectedDirection = watch("direction");
 
   async function onSubmit(data: LoanFormValues) {
@@ -64,225 +84,393 @@ function CreateLoanForm({ onSuccess }: { onSuccess: () => void }) {
         note: data.note || undefined,
         loan_date: data.loan_date,
       });
+      toast({
+        title: "Loan recorded",
+        description: `${data.direction === "lent" ? "Lent" : "Borrowed"} ${data.currency} ${data.amount / 100}.`,
+        variant: "success",
+      });
       onSuccess();
     } catch (err) {
-      setServerError(err instanceof ApiRequestError ? err.error.message : "Failed to create loan");
+      setServerError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to create loan",
+      );
     }
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-      {serverError && (
-        <div className="p-3 rounded-lg bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] text-sm">
+      {serverError ? (
+        <p
+          role="alert"
+          className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+        >
           {serverError}
-        </div>
-      )}
-
-      {/* Direction toggle */}
-      <div className="space-y-1.5">
-        <Label>Direction</Label>
+        </p>
+      ) : null}
+      <fieldset
+        className="space-y-1.5"
+        aria-describedby={errors.direction ? directionErrorId : undefined}
+      >
+        <legend className="text-sm font-medium leading-none">Direction</legend>
         <div className="grid grid-cols-2 gap-2">
-          {(["lent", "borrowed"] as const).map((dir) => (
-            <label key={dir} className="cursor-pointer">
-              <input type="radio" value={dir} {...register("direction")} className="sr-only" />
-              <div className={cn(
-                "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-sm font-medium transition-all",
-                selectedDirection === dir
-                  ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] border-[hsl(var(--primary))]"
-                  : "bg-[hsl(var(--background))] text-[hsl(var(--foreground))] border-[hsl(var(--input))] hover:bg-[hsl(var(--muted))]",
-              )}>
-                {dir === "lent" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownLeft className="h-4 w-4" />}
-                {dir === "lent" ? "I lent" : "I borrowed"}
-              </div>
-            </label>
-          ))}
+          {(["lent", "borrowed"] as const).map((direction) => {
+            const directionId = `${fieldId}-direction-${direction}`;
+            return (
+              <label
+                key={direction}
+                htmlFor={directionId}
+                className="cursor-pointer"
+              >
+                <input
+                  id={directionId}
+                  type="radio"
+                  value={direction}
+                  {...register("direction")}
+                  className="sr-only"
+                />
+                <span
+                  className={cn(
+                    "flex min-h-11 items-center justify-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition-colors",
+                    selectedDirection === direction
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-input bg-background text-foreground hover:bg-muted",
+                  )}
+                >
+                  {direction === "lent" ? (
+                    <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {direction === "lent" ? "I lent" : "I borrowed"}
+                </span>
+              </label>
+            );
+          })}
         </div>
-      </div>
-
-      {/* Counterparty */}
+        {errors.direction ? (
+          <p id={directionErrorId} className="text-xs text-destructive">
+            {errors.direction.message}
+          </p>
+        ) : null}
+      </fieldset>
       <div className="space-y-1.5">
-        <Label>Person</Label>
-        <Input placeholder="Name of the other person" {...register("counterparty_name")} />
-        {errors.counterparty_name && <p className="text-xs text-[hsl(var(--destructive))]">{errors.counterparty_name.message}</p>}
+        <Label htmlFor={`${fieldId}-counterparty`}>Person</Label>
+        <Input
+          id={`${fieldId}-counterparty`}
+          placeholder="Name of the other person"
+          aria-invalid={errors.counterparty_name ? true : undefined}
+          aria-describedby={
+            errors.counterparty_name ? counterpartyErrorId : undefined
+          }
+          {...register("counterparty_name")}
+        />
+        {errors.counterparty_name ? (
+          <p id={counterpartyErrorId} className="text-xs text-destructive">
+            {errors.counterparty_name.message}
+          </p>
+        ) : null}
       </div>
-
-      {/* Currency + Date */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Currency</Label>
+          <Label htmlFor={`${fieldId}-currency`}>Currency</Label>
           <Controller
             name="currency"
             control={control}
             render={({ field }) => (
-              <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
-                <SelectTrigger>
+              <Select
+                value={field.value}
+                onValueChange={(value) => {
+                  field.onChange(value);
+                  setCurrency(value);
+                }}
+              >
+                <SelectTrigger id={`${fieldId}-currency`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCY_CODES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {CURRENCY_CODES.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {code}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             )}
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Date</Label>
-          <Input type="date" {...register("loan_date")} />
-          {errors.loan_date && <p className="text-xs text-[hsl(var(--destructive))]">{errors.loan_date.message}</p>}
+          <Label htmlFor={`${fieldId}-date`}>Date</Label>
+          <Input
+            id={`${fieldId}-date`}
+            type="date"
+            aria-invalid={errors.loan_date ? true : undefined}
+            aria-describedby={errors.loan_date ? dateErrorId : undefined}
+            {...register("loan_date")}
+          />
+          {errors.loan_date ? (
+            <p id={dateErrorId} className="text-xs text-destructive">
+              {errors.loan_date.message}
+            </p>
+          ) : null}
         </div>
       </div>
-
-      {/* Amount */}
       <div className="space-y-1.5">
-        <Label>Amount</Label>
-        <AmountInput value={amount} currency={currency} onChange={(v) => { setAmount(v); setValue("amount", v); }} />
-        {errors.amount && <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>}
+        <Label htmlFor={`${fieldId}-amount`}>Amount</Label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{currency}</span>
+          <Input
+            id={`${fieldId}-amount`}
+            type="number"
+            inputMode="numeric"
+            min="1"
+            step="1"
+            value={amount || ""}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setAmount(Number.isFinite(next) ? next : 0);
+              setValue("amount", next, { shouldValidate: true });
+            }}
+            aria-describedby={errors.amount ? amountErrorId : undefined}
+          />
+        </div>
+        {errors.amount ? (
+          <p id={amountErrorId} className="text-xs text-destructive">
+            {errors.amount.message}
+          </p>
+        ) : null}
       </div>
-
-      {/* Note */}
       <div className="space-y-1.5">
-        <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(optional)</span></Label>
-        <Input placeholder="What was this for?" {...register("note")} />
+        <Label htmlFor={`${fieldId}-note`}>
+          Note <span className="text-muted-foreground">(optional)</span>
+        </Label>
+        <Input
+          id={`${fieldId}-note`}
+          placeholder="What was this for?"
+          {...register("note")}
+        />
       </div>
-
-      <div className="flex gap-3 pt-2">
-        <Button type="submit" disabled={isPending} className="flex-1">
-          {isPending ? "Creating…" : "Create loan"}
-        </Button>
-      </div>
+      <Button type="submit" disabled={isPending} className="w-full">
+        {isPending ? "Creating…" : "Create loan"}
+      </Button>
     </form>
   );
 }
 
 type TabKey = "lent" | "borrowed" | "balances";
+function isLoanTab(value: string): value is TabKey {
+  return value === "lent" || value === "borrowed" || value === "balances";
+}
+
+function LoanList({ loans }: { loans: Loan[] }) {
+  return (
+    <div className="space-y-2">
+      {loans.map((loan) => {
+        const statusInfo = LOAN_STATUS_BADGE_SHORT[loan.status] ?? {
+          label: loan.status,
+          variant: "outline" as const,
+        };
+        return (
+          <Link
+            key={loan.id}
+            href={ROUTES.loanDetail(loan.id) as never}
+            className="block rounded-xl border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <div className="flex items-center gap-3">
+              <Avatar name={loan.counterparty_name} size="md" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-semibold">
+                    {loan.counterparty_name}
+                  </p>
+                  <Badge variant={statusInfo.variant} className="text-xs">
+                    {statusInfo.label}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {loan.direction === "lent" ? "You lent" : "You borrowed"} ·{" "}
+                  <DateDisplay iso={loan.loan_date} />
+                </p>
+                {loan.note ? (
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {loan.note}
+                  </p>
+                ) : null}
+              </div>
+              <CurrencyAmount
+                amount={loan.amount}
+                currency={loan.currency}
+                signed
+                className={cn(
+                  "shrink-0 text-sm font-semibold",
+                  loan.direction === "lent" ? "text-primary" : "text-negative",
+                )}
+              />
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function LoanSummary({
+  lentQuery,
+  borrowedQuery,
+}: {
+  lentQuery: UseQueryResult<Loan[], Error>;
+  borrowedQuery: UseQueryResult<Loan[], Error>;
+}) {
+  return (
+    <QueryBoundary {...lentQuery} isEmpty={() => false} className="min-h-48">
+      {(lentData) => (
+        <QueryBoundary
+          {...borrowedQuery}
+          isEmpty={() => false}
+          className="min-h-48"
+        >
+          {(borrowedData) => {
+            const totalLent = lentData.reduce(
+              (sum, loan) => sum + loan.amount,
+              0,
+            );
+            const totalBorrowed = borrowedData.reduce(
+              (sum, loan) => sum + loan.amount,
+              0,
+            );
+            return (
+              <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-xl bg-primary p-6 text-primary-foreground shadow-sm md:p-8">
+                  <p className="text-sm text-primary-foreground/75">
+                    Net loan position
+                  </p>
+                  <CurrencyAmount
+                    amount={totalLent - totalBorrowed}
+                    currency={
+                      lentData[0]?.currency ??
+                      borrowedData[0]?.currency ??
+                      "LKR"
+                    }
+                    signed
+                    className="mt-3 block font-display text-4xl font-semibold text-primary-foreground"
+                  />
+                  <p className="mt-3 max-w-sm text-sm leading-6 text-primary-foreground/80">
+                    Positive means the group owes you more than you owe the
+                    group.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
+                  <div className="rounded-xl border bg-card p-5">
+                    <p className="text-sm text-muted-foreground">Total lent</p>
+                    <CurrencyAmount
+                      amount={totalLent}
+                      currency={lentData[0]?.currency ?? "LKR"}
+                      className="mt-1 block text-2xl font-semibold"
+                    />
+                  </div>
+                  <div className="rounded-xl border bg-card p-5">
+                    <p className="text-sm text-muted-foreground">
+                      Total borrowed
+                    </p>
+                    <CurrencyAmount
+                      amount={totalBorrowed}
+                      currency={borrowedData[0]?.currency ?? "LKR"}
+                      className="mt-1 block text-2xl font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        </QueryBoundary>
+      )}
+    </QueryBoundary>
+  );
+}
 
 export default function LoansPage() {
   const [tab, setTab] = useState<TabKey>("lent");
   const [sheetOpen, setSheetOpen] = useState(false);
-
-  const { data: lentLoans, isLoading: lentLoading } = useLoans("lent");
-  const { data: borrowedLoans, isLoading: borrowedLoading } = useLoans("borrowed");
-  const { data: balances, isLoading: balancesLoading } = useMyBalances();
-
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: "lent", label: "Lent" },
-    { key: "borrowed", label: "Borrowed" },
-    { key: "balances", label: "All balances" },
-  ];
-
-  const loans = tab === "lent" ? lentLoans : borrowedLoans;
-  const loading = tab === "lent" ? lentLoading : (tab === "borrowed" ? borrowedLoading : balancesLoading);
+  const lentQuery = useLoans("lent");
+  const borrowedQuery = useLoans("borrowed");
+  const balancesQuery = useMyBalances();
 
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
-      <div className="flex items-center justify-between">
-        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1.5" />
-              New loan
-            </Button>
-          </SheetTrigger>
-          <SheetContent title="New loan" description="Record a borrow or lend">
-            <CreateLoanForm onSuccess={() => setSheetOpen(false)} />
-          </SheetContent>
-        </Sheet>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b overflow-x-auto scrollbar-none">
-        {tabs.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
-              tab === key
-                ? "border-[hsl(var(--primary))] text-[hsl(var(--foreground))]"
-                : "border-transparent text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-            }`}
+    <main className="mx-auto max-w-5xl space-y-8 p-4 md:p-8">
+      <PageHeader
+        eyebrow="Money between people"
+        title="Loans"
+        description="Keep direct lending and borrowing visible, even when it never touches a team."
+        action={
+          <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+            <SheetTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4" aria-hidden="true" /> New loan
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              title="New loan"
+              description="Record a direct borrow or lend."
+            >
+              <CreateLoanForm onSuccess={() => setSheetOpen(false)} />
+            </SheetContent>
+          </Sheet>
+        }
+      />
+      <LoanSummary lentQuery={lentQuery} borrowedQuery={borrowedQuery} />
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          if (isLoanTab(value)) setTab(value);
+        }}
+      >
+        <TabsList aria-label="Loan views" className="w-full sm:w-auto">
+          <TabsTrigger value="lent">
+            Lent{lentQuery.data ? ` (${lentQuery.data.length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="borrowed">
+            Borrowed
+            {borrowedQuery.data ? ` (${borrowedQuery.data.length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="balances">All balances</TabsTrigger>
+        </TabsList>
+        <TabsContent value="lent" className="mt-5">
+          <QueryBoundary
+            {...lentQuery}
+            isEmpty={(loans) => loans.length === 0}
+            emptyMessage="No lent loans yet. Record one when someone pays you back later."
           >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Loan list */}
-      {(tab === "lent" || tab === "borrowed") && (
-        <>
-          {loading ? (
+            <LoanList loans={lentQuery.data ?? []} />
+          </QueryBoundary>
+        </TabsContent>
+        <TabsContent value="borrowed" className="mt-5">
+          <QueryBoundary
+            {...borrowedQuery}
+            isEmpty={(loans) => loans.length === 0}
+            emptyMessage="No borrowed loans yet. Record one when you borrow directly."
+          >
+            <LoanList loans={borrowedQuery.data ?? []} />
+          </QueryBoundary>
+        </TabsContent>
+        <TabsContent value="balances" className="mt-5">
+          <QueryBoundary
+            {...balancesQuery}
+            isEmpty={(balances) => balances.length === 0}
+            emptyMessage="You are all settled up across your teams."
+          >
             <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16" />)}
-            </div>
-          ) : !loans?.length ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              No {tab} loans yet.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {loans.map((loan) => {
-                const statusInfo = LOAN_STATUS_BADGE_SHORT[loan.status] ?? { label: loan.status, variant: "outline" as const };
-                return (
-                  <Link key={loan.id} href={ROUTES.loanDetail(loan.id) as never}>
-                    <div className="p-4 border rounded-xl bg-[hsl(var(--card))] hover:bg-[hsl(var(--muted))] transition-colors cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={loan.counterparty_name} size="md" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium text-sm">{loan.counterparty_name}</p>
-                            <Badge variant={statusInfo.variant} className="text-xs">{statusInfo.label}</Badge>
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            {loan.direction === "lent" ? (
-                              <ArrowUpRight className="h-3 w-3 text-[hsl(var(--primary))]" />
-                            ) : (
-                              <ArrowDownLeft className="h-3 w-3 text-[hsl(var(--destructive))]" />
-                            )}
-                            <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                              {loan.direction === "lent" ? "You lent" : "You borrowed"} · <DateDisplay iso={loan.loan_date} />
-                            </span>
-                          </div>
-                          {loan.note && <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5 truncate">{loan.note}</p>}
-                        </div>
-                        <CurrencyAmount
-                          amount={loan.amount}
-                          currency={loan.currency}
-                          signed={true}
-                          className={cn("text-sm font-semibold flex-shrink-0", loan.direction === "lent" ? "text-[hsl(var(--primary))]" : "text-[hsl(var(--destructive))]")}
-                        />
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* All balances tab */}
-      {tab === "balances" && (
-        <>
-          {loading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14" />)}
-            </div>
-          ) : !balances?.length ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              You&apos;re all settled up across all teams.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {balances.map((b) => (
+              {(balancesQuery.data ?? []).map((balance) => (
                 <DebtBar
-                  key={b.counterparty_id}
-                  counterpartyName={b.counterparty_name}
-                  netAmount={b.net_amount}
+                  key={balance.counterparty_id}
+                  counterpartyName={balance.counterparty_name}
+                  netAmount={balance.net_amount}
                 />
               ))}
             </div>
-          )}
-        </>
-      )}
-    </div>
+          </QueryBoundary>
+        </TabsContent>
+      </Tabs>
+    </main>
   );
 }

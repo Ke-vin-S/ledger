@@ -16,7 +16,7 @@ export function DebtBar({ counterpartyName, netAmount }: Props) {
       </div>
       <div className="text-right flex-shrink-0">
         <CurrencyAmount amount={netAmount} signed className="text-sm font-semibold" />
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+        <p className="text-xs text-muted-foreground">
           {owes ? "you owe" : "owes you"}
         </p>
       </div>

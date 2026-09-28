@@ -49,3 +49,9 @@ web/out/
 # .vscode/
 
 .claude/settings.local.json
+
+# IDE
+.idea/
+
+# CDK context cache
+infra/cdk.context.json

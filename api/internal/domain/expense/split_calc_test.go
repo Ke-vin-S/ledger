@@ -128,6 +128,20 @@ func TestComputeSplits_Percentage_SumNot100_Error(t *testing.T) {
 	}
 }
 
+func TestComputeSplits_Percentage_NegativeShareUnits_Error(t *testing.T) {
+	_, err := expense.ComputeSplits(expense.MethodPercentage, 1000, []expense.SplitInput{si(u1, 0, -50), si(u2, 0, 150)})
+	if !errors.Is(err, expense.ErrInvalidSplitData) {
+		t.Fatalf("want ErrInvalidSplitData, got %v", err)
+	}
+}
+
+func TestComputeSplits_Percentage_ShareUnitsOver100_Error(t *testing.T) {
+	_, err := expense.ComputeSplits(expense.MethodPercentage, 1000, []expense.SplitInput{si(u1, 0, 100), si(u2, 0, 1)})
+	if !errors.Is(err, expense.ErrInvalidSplitData) {
+		t.Fatalf("want ErrInvalidSplitData, got %v", err)
+	}
+}
+
 func TestComputeSplits_Percentage_StoresShareUnits(t *testing.T) {
 	got, _ := expense.ComputeSplits(expense.MethodPercentage, 1000, []expense.SplitInput{si(u1, 0, 70), si(u2, 0, 30)})
 	if got[0].ShareUnits == nil || *got[0].ShareUnits != 70 {

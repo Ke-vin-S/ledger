@@ -2,6 +2,9 @@ package repository_test
 
 import (
 	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +83,88 @@ func TestSettlementRepo_DebtBalance_DecreasesOnConfirm(t *testing.T) {
 	}
 }
 
+func TestSettlementRepo_DebtBalance_IgnoresNonCreditorPayment(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	expRepo := repository.NewExpenseRepo(pool)
+	setRepo := repository.NewSettlementRepo(pool)
+
+	creditor := seedUser(t, pool, "Creditor")
+	debtor := seedUser(t, pool, "Debtor")
+	accomplice := seedUser(t, pool, "Accomplice")
+	teamID := seedTeam(t, pool, creditor)
+	expID := seedExpenseWithDebt(t, ctx, expRepo, teamID, creditor, debtor, 1000)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO settlements
+			(expense_id, payer_id, payee_id, amount, method, status, recorded_by, settled_on)
+		VALUES ($1, $2, $3, 1000, 'cash', 'confirmed', $2, CURRENT_DATE)
+	`, expID, debtor, accomplice); err != nil {
+		t.Fatalf("seed legacy non-creditor settlement: %v", err)
+	}
+
+	bal, err := setRepo.GetDebtBalance(ctx, expID, debtor)
+	if err != nil {
+		t.Fatalf("debt balance: %v", err)
+	}
+	if bal.Balance != 1000 {
+		t.Fatalf("balance = %d, want 1000", bal.Balance)
+	}
+}
+
+func TestSettlementRepo_RecordSettlementTx_ParallelFullBalance_AtMostOneSuccess(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	expRepo := repository.NewExpenseRepo(pool)
+	setRepo := repository.NewSettlementRepo(pool)
+
+	creditor := seedUser(t, pool, "Creditor")
+	debtor := seedUser(t, pool, "Debtor")
+	teamID := seedTeam(t, pool, creditor)
+	expID := seedExpenseWithDebt(t, ctx, expRepo, teamID, creditor, debtor, 1000)
+
+	const attempts = 8
+	var successes atomic.Int32
+	var unexpected atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := setRepo.RecordSettlementTx(ctx, &settlement.Settlement{
+				ExpenseID: expID, PayerID: debtor, PayeeID: creditor, Amount: 1000,
+				Method: settlement.MethodCash, RecordedBy: debtor, SettledOn: time.Now(),
+			})
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, settlement.ErrSettlementExceedsDebt):
+			default:
+				unexpected.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := successes.Load(); got != 1 {
+		t.Fatalf("successful settlements = %d, want 1", got)
+	}
+	if got := unexpected.Load(); got != 0 {
+		t.Fatalf("unexpected errors = %d, want 0", got)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM settlements WHERE expense_id = $1`, expID).Scan(&count); err != nil {
+		t.Fatalf("count settlements: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("stored settlements = %d, want 1", count)
+	}
+}
+
 func TestSettlementRepo_Confirm_SetsStatusAndConfirmer(t *testing.T) {
 	pool := requireDB(t)
 	truncateAll(t, pool)
@@ -112,5 +197,57 @@ func TestSettlementRepo_Confirm_SetsStatusAndConfirmer(t *testing.T) {
 	}
 	if confirmed.ConfirmedBy == nil || *confirmed.ConfirmedBy != creditor {
 		t.Error("confirmed_by not set to creditor")
+	}
+}
+
+func TestSettlementRepo_TeamAndUserNetBalances_AgreeOnSign(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	expRepo := repository.NewExpenseRepo(pool)
+	setRepo := repository.NewSettlementRepo(pool)
+
+	creditor := seedUser(t, pool, "Creditor")
+	debtor := seedUser(t, pool, "Debtor")
+	teamID := seedTeam(t, pool, creditor)
+	seedExpenseWithDebt(t, ctx, expRepo, teamID, creditor, debtor, 1000)
+
+	teamBalances, err := setRepo.ListTeamNetBalances(ctx, teamID, debtor)
+	if err != nil {
+		t.Fatalf("team balances: %v", err)
+	}
+	if len(teamBalances) != 1 || teamBalances[0].NetAmount != -1000 {
+		t.Fatalf("team balance = %+v, want debtor -1000", teamBalances)
+	}
+	userBalances, err := setRepo.ListUserNetBalances(ctx, debtor)
+	if err != nil {
+		t.Fatalf("user balances: %v", err)
+	}
+	if len(userBalances) != 1 || userBalances[0].NetAmount != -1000 {
+		t.Fatalf("user balance = %+v, want debtor -1000", userBalances)
+	}
+}
+
+func TestSettlementRepo_RecordSettlementTx_NotifiesPayee(t *testing.T) {
+	pool := requireDB(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	expenseRepo := repository.NewExpenseRepo(pool)
+	setRepo := repository.NewSettlementRepo(pool)
+	creditor := seedUser(t, pool, "Creditor")
+	debtor := seedUser(t, pool, "Debtor")
+	teamID := seedTeam(t, pool, creditor)
+	expenseID := seedExpenseWithDebt(t, ctx, expenseRepo, teamID, creditor, debtor, 1000)
+
+	created, err := setRepo.RecordSettlementTx(ctx, &settlement.Settlement{ExpenseID: expenseID, PayerID: debtor, PayeeID: creditor, Amount: 400, Method: settlement.MethodCash, RecordedBy: debtor, SettledOn: time.Now()})
+	if err != nil {
+		t.Fatalf("record settlement: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE user_id=$1 AND type='settlement.created' AND entity_id=$2`, creditor, created.ID).Scan(&count); err != nil {
+		t.Fatalf("count notifications: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("payee notifications = %d, want 1", count)
 	}
 }

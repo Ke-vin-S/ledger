@@ -1,66 +1,96 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-positive: hsl(var(--positive));
+  --color-negative: hsl(var(--negative));
+  --color-pending: hsl(var(--pending));
+  --color-settled: hsl(var(--settled));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+}
 
 @layer base {
   :root {
-    /* Brand: #2563EB · Background: #F5F7FA · Text: #0F1C2E */
-    --bottom-nav-h: 4rem;
-    --background: 216 33% 97%;
-    --foreground: 215 50% 12%;          /* #0F1C2E — deep navy, high contrast */
+    --bottom-nav-h: 4.5rem;
+    --background: 96 9% 90%;
+    --foreground: 80 10% 5%;
     --card: 0 0% 100%;
-    --card-foreground: 215 50% 12%;
+    --card-foreground: 80 10% 5%;
     --popover: 0 0% 100%;
-    --popover-foreground: 215 50% 12%;
-    --primary: 219 79% 53%;             /* #2563EB brand blue */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 214 32% 93%;
-    --secondary-foreground: 215 50% 12%;
-    --muted: 214 28% 93%;
-    --muted-foreground: 215 20% 40%;    /* ~#506178 — 5.5:1 contrast on bg */
-    --accent: 213 90% 95%;
-    --accent-foreground: 219 79% 43%;
-    --destructive: 0 72% 48%;
+    --popover-foreground: 80 10% 5%;
+    --primary: 88 74% 66%;
+    --primary-foreground: 80 10% 5%;
+    --secondary: 88 22% 88%;
+    --secondary-foreground: 80 10% 5%;
+    --muted: 90 12% 88%;
+    --muted-foreground: 84 7% 37%;
+    --accent: 88 64% 83%;
+    --accent-foreground: 80 10% 5%;
+    --destructive: 359 66% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 25% 87%;
-    --input: 214 25% 87%;
-    --ring: 219 79% 53%;
-    --radius: 0.5rem;
-    --positive: 160 84% 34%;            /* #059669 green */
-    --negative: 0 72% 48%;              /* #DC2626 red */
-    --pending: 38 92% 40%;
-    --settled: 220 9% 46%;
+    --border: 90 10% 78%;
+    --input: 90 10% 76%;
+    --ring: 88 74% 52%;
+    --positive: 136 46% 36%;
+    --negative: 359 66% 51%;
+    --pending: 36 78% 38%;
+    --settled: 151 32% 35%;
   }
 
   .dark {
-    --background: 222 47% 9%;           /* #0B1120 */
-    --foreground: 214 40% 94%;          /* #E6EDF5 */
-    --card: 218 40% 14%;                /* #182030 */
-    --card-foreground: 214 40% 94%;
-    --popover: 218 40% 14%;
-    --popover-foreground: 214 40% 94%;
-    --primary: 219 79% 65%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 216 30% 20%;
-    --secondary-foreground: 214 40% 94%;
-    --muted: 216 30% 20%;
-    --muted-foreground: 215 20% 68%;    /* lightened for dark contrast */
-    --accent: 216 30% 20%;
-    --accent-foreground: 214 40% 94%;
-    --destructive: 0 62% 50%;
+    --background: 96 9% 6%;
+    --foreground: 90 14% 94%;
+    --card: 96 8% 10%;
+    --card-foreground: 90 14% 94%;
+    --popover: 96 8% 12%;
+    --popover-foreground: 90 14% 94%;
+    --primary: 88 74% 66%;
+    --primary-foreground: 80 10% 5%;
+    --secondary: 90 8% 17%;
+    --secondary-foreground: 90 14% 94%;
+    --muted: 90 8% 15%;
+    --muted-foreground: 84 9% 68%;
+    --accent: 88 32% 22%;
+    --accent-foreground: 88 74% 76%;
+    --destructive: 359 61% 58%;
     --destructive-foreground: 0 0% 100%;
-    --border: 216 25% 24%;
-    --input: 216 25% 24%;
-    --ring: 219 79% 65%;
-    --positive: 160 60% 52%;
-    --negative: 0 72% 62%;
-    --pending: 38 80% 57%;
-    --settled: 220 9% 58%;
+    --border: 90 7% 24%;
+    --input: 90 7% 28%;
+    --ring: 88 74% 66%;
+    --positive: 136 43% 54%;
+    --negative: 359 69% 66%;
+    --pending: 36 76% 62%;
+    --settled: 151 32% 56%;
   }
 }
 
 @layer base {
   html {
-    /* Bump the root from 16 → 17 px so all rem values scale up */
-    font-size: 106.25%;
+    font-size: 100%;
     scroll-behavior: smooth;
   }
 
@@ -72,37 +102,54 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
-    font-size: 1rem;              /* 17 px */
-    line-height: 1.65;
-    letter-spacing: 0.018em;     /* the "more distance" the user asked for */
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-serif, var(--font-sans, ui-serif, serif));
-    letter-spacing: -0.01em;     /* still tight but not over-squeezed */
-    line-height: 1.25;
-    font-weight: 600;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display), var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.08;
   }
 
-  /* Tabular nums everywhere an amount is shown */
-  [data-amount], .tabular-nums {
+  [data-amount],
+  .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Crisp focus rings */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
-    outline-offset: 2px;
-    border-radius: var(--radius);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
   }
 }
 
 @layer utilities {
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

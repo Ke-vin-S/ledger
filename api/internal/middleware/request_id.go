@@ -5,16 +5,19 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"regexp"
 )
 
 type contextKey string
+
+var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 const requestIDKey contextKey = "request_id"
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
-		if id == "" {
+		if !requestIDPattern.MatchString(id) {
 			id = uuid.New().String()
 		}
 		ctx := context.WithValue(r.Context(), requestIDKey, id)

@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -10,6 +11,8 @@ import (
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	"github.com/Ke-vin-S/ledger/api/internal/handler"
+	"github.com/Ke-vin-S/ledger/api/internal/logger"
+	"go.uber.org/zap"
 )
 
 type Handler struct {
@@ -66,10 +69,14 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	if !handler.Decode(w, r, &body) {
 		return
 	}
-
 	u, err := h.users.UpdateMe(r.Context(), uid, body.DisplayName, body.AvatarURL, body.CurrencyPref, body.Timezone)
 	if err != nil {
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		if strings.Contains(err.Error(), "currency_pref") || strings.Contains(err.Error(), "timezone") || strings.Contains(err.Error(), "display_name") {
+			handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		} else {
+			logger.FromContext(r.Context()).Error("update profile failed", zap.Error(err))
+			handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to update profile")
+		}
 		return
 	}
 	handler.JSON(w, r, http.StatusOK, toFullResponse(u))
@@ -101,7 +108,8 @@ func (h *Handler) UpdateNotificationPrefs(w http.ResponseWriter, r *http.Request
 
 	prefs, err := h.users.UpdateNotificationPrefs(r.Context(), uid, body.EmailEnabled, body.DigestMode, body.DisabledTypes)
 	if err != nil {
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		logger.FromContext(r.Context()).Error("update notification preferences failed", zap.Error(err))
+		handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to update notification preferences")
 		return
 	}
 	handler.JSON(w, r, http.StatusOK, toPrefsResponse(prefs))
@@ -135,7 +143,12 @@ func (h *Handler) CreateAnonymous(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.users.CreateAnonymous(r.Context(), body.DisplayName, uid)
 	if err != nil {
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		if strings.Contains(err.Error(), "display_name") {
+			handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		} else {
+			logger.FromContext(r.Context()).Error("create anonymous user failed", zap.Error(err))
+			handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to create anonymous user")
+		}
 		return
 	}
 	handler.JSON(w, r, http.StatusCreated, toPublicResponse(u))
@@ -158,6 +171,8 @@ func (h *Handler) GenerateClaimToken(w http.ResponseWriter, r *http.Request) {
 			handler.Error(w, r, http.StatusNotFound, "USER_NOT_FOUND", "anonymous user not found")
 		case user.ErrNotAnonymous:
 			handler.Error(w, r, http.StatusBadRequest, "NOT_ANONYMOUS", "user is not anonymous")
+		case user.ErrNotAnonymousOwner:
+			handler.Error(w, r, http.StatusForbidden, "FORBIDDEN", "you do not own this anonymous user")
 		default:
 			handler.Error(w, r, http.StatusInternalServerError, "SERVER_ERROR", "failed to generate claim token")
 		}
@@ -210,28 +225,28 @@ func (h *Handler) Claim(w http.ResponseWriter, r *http.Request) {
 // --- response DTOs ---
 
 type fullUserResponse struct {
-	ID           uuid.UUID  `json:"id"`
-	IdentityType string     `json:"identity_type"`
-	DisplayName  string     `json:"display_name"`
-	Email        *string    `json:"email,omitempty"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	CurrencyPref string     `json:"currency_pref"`
-	Timezone     string     `json:"timezone"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	IdentityType string    `json:"identity_type"`
+	DisplayName  string    `json:"display_name"`
+	Email        *string   `json:"email,omitempty"`
+	AvatarURL    *string   `json:"avatar_url,omitempty"`
+	CurrencyPref string    `json:"currency_pref"`
+	Timezone     string    `json:"timezone"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type publicUserResponse struct {
-	ID           uuid.UUID  `json:"id"`
-	IdentityType string     `json:"identity_type"`
-	DisplayName  string     `json:"display_name"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	IdentityType string    `json:"identity_type"`
+	DisplayName  string    `json:"display_name"`
+	AvatarURL    *string   `json:"avatar_url,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type notificationPrefsResponse struct {
-	EmailEnabled  bool     `json:"email_enabled"`
-	DigestMode    bool     `json:"digest_mode"`
-	DisabledTypes []string `json:"disabled_types"`
+	EmailEnabled  bool      `json:"email_enabled"`
+	DigestMode    bool      `json:"digest_mode"`
+	DisabledTypes []string  `json:"disabled_types"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 

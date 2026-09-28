@@ -51,7 +51,7 @@ func overrideEndpoints(t *testing.T, tokenURL, userInfoURL string) {
 }
 
 func TestExchangeGoogleCode_Success(t *testing.T) {
-	want := googleUserInfo{Sub: "12345", Email: "test@example.com", Name: "Test User", Picture: "https://example.com/pic.jpg"}
+	want := googleUserInfo{Sub: "12345", Email: "test@example.com", EmailVerified: true, Name: "Test User", Picture: "https://example.com/pic.jpg"}
 
 	tokenSrv := mockTokenServer(t, "auth-code-abc", "tok-xyz")
 	defer tokenSrv.Close()
@@ -127,5 +127,57 @@ func TestExchangeGoogleCode_MissingSub(t *testing.T) {
 	_, err := exchangeGoogleCode(context.Background(), "code", "cid", "csecret")
 	if err == nil {
 		t.Fatal("expected error for missing sub, got nil")
+	}
+}
+
+func TestExchangeGoogleCode_UnverifiedEmailRejected(t *testing.T) {
+	tokenSrv := mockTokenServer(t, "code", "access-token")
+	defer tokenSrv.Close()
+	infoSrv := mockUserInfoServer(t, "access-token", googleUserInfo{Sub: "123", Email: "x@x.com", EmailVerified: false})
+	defer infoSrv.Close()
+	overrideEndpoints(t, tokenSrv.URL, infoSrv.URL)
+
+	_, err := exchangeGoogleCode(context.Background(), "code", "cid", "csecret")
+	if err == nil {
+		t.Fatal("expected unverified email to be rejected")
+	}
+}
+
+func TestRefreshCookiePolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		isLocal    bool
+		wantSame   http.SameSite
+		wantSecure bool
+	}{
+		{name: "production cross-site", isLocal: false, wantSame: http.SameSiteNoneMode, wantSecure: true},
+		{name: "local same-site", isLocal: true, wantSame: http.SameSiteStrictMode, wantSecure: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			setRefreshCookie(recorder, "token", tt.isLocal)
+			cookies := recorder.Result().Cookies()
+			if len(cookies) != 1 {
+				t.Fatalf("got %d cookies, want 1", len(cookies))
+			}
+			cookie := cookies[0]
+			if !cookie.HttpOnly || cookie.Secure != tt.wantSecure || cookie.SameSite != tt.wantSame {
+				t.Fatalf("cookie policy = HttpOnly:%v Secure:%v SameSite:%v, want HttpOnly:true Secure:%v SameSite:%v", cookie.HttpOnly, cookie.Secure, cookie.SameSite, tt.wantSecure, tt.wantSame)
+			}
+		})
+	}
+}
+
+func TestClearRefreshCookieMatchesProductionPolicy(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	clearRefreshCookie(recorder, false)
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("got %d cookies, want 1", len(cookies))
+	}
+	cookie := cookies[0]
+	if cookie.MaxAge >= 0 || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteNoneMode {
+		t.Fatalf("clear cookie policy = MaxAge:%d HttpOnly:%v Secure:%v SameSite:%v", cookie.MaxAge, cookie.HttpOnly, cookie.Secure, cookie.SameSite)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"errors"
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
+	"github.com/Ke-vin-S/ledger/api/internal/domain/expense"
 	"github.com/Ke-vin-S/ledger/api/internal/graph"
 	"github.com/Ke-vin-S/ledger/api/internal/graph/model"
 )
@@ -20,7 +22,7 @@ type fakeActivityStore struct {
 	err     error
 }
 
-func (s *fakeActivityStore) QueryTeamActivityFeed(_ context.Context, _ uuid.UUID, _ int, _ *time.Time) ([]*model.ActivityEntry, error) {
+func (s *fakeActivityStore) QueryTeamActivityFeed(_ context.Context, _ uuid.UUID, _ int, _ *graph.ActivityCursor) ([]*model.ActivityEntry, error) {
 	return s.entries, s.err
 }
 
@@ -42,10 +44,29 @@ func (s *fakeHistoryStore) QueryExpenseHistory(_ context.Context, _ uuid.UUID) (
 	return s.versions, s.err
 }
 
+type fakeMemberships struct {
+	err error
+}
+
+func (m *fakeMemberships) RequireMembership(context.Context, uuid.UUID, uuid.UUID, string) error {
+	return m.err
+}
+
+type fakeExpenseReader struct {
+	err error
+}
+
+func (r *fakeExpenseReader) GetExpense(context.Context, uuid.UUID, uuid.UUID) (*expense.ExpenseWithSplits, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &expense.ExpenseWithSplits{}, nil
+}
+
 // ── helper ────────────────────────────────────────────────────────────────────
 
 func newResolver(act graph.ActivityFeedStore, dash graph.DashboardStore, hist graph.ExpenseHistoryStore) *graph.Resolver {
-	return graph.NewResolver(act, dash, hist)
+	return graph.NewResolver(act, dash, hist, &fakeMemberships{}, &fakeExpenseReader{})
 }
 
 // ── TeamActivityFeed ──────────────────────────────────────────────────────────
@@ -60,9 +81,8 @@ func TestResolver_TeamActivityFeed_ReturnsItems(t *testing.T) {
 	}
 	r := newResolver(act, &fakeDashStore{}, &fakeHistoryStore{})
 	qr := r.Query()
-
 	limit := 20
-	page, err := qr.TeamActivityFeed(context.Background(), teamID, &limit, nil)
+	page, err := qr.TeamActivityFeed(contextWithUserID(uuid.New()), teamID, &limit, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,9 +107,8 @@ func TestResolver_TeamActivityFeed_HasMore_WhenItemsExceedLimit(t *testing.T) {
 	}
 	act := &fakeActivityStore{entries: entries}
 	r := newResolver(act, &fakeDashStore{}, &fakeHistoryStore{})
-
 	limit := 20
-	page, err := r.Query().TeamActivityFeed(context.Background(), teamID, &limit, nil)
+	page, err := r.Query().TeamActivityFeed(contextWithUserID(uuid.New()), teamID, &limit, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,12 +134,20 @@ func TestResolver_TeamActivityFeed_InvalidTeamID_ReturnsError(t *testing.T) {
 func TestResolver_TeamActivityFeed_EmptyResult_ReturnsEmptyItems(t *testing.T) {
 	r := newResolver(&fakeActivityStore{entries: nil}, &fakeDashStore{}, &fakeHistoryStore{})
 	limit := 20
-	page, err := r.Query().TeamActivityFeed(context.Background(), uuid.New().String(), &limit, nil)
+	page, err := r.Query().TeamActivityFeed(contextWithUserID(uuid.New()), uuid.New().String(), &limit, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if page.Items == nil {
 		t.Error("want empty slice, got nil")
+	}
+}
+
+func TestResolver_TeamActivityFeed_NonMemberReturnsError(t *testing.T) {
+	r := graph.NewResolver(&fakeActivityStore{}, &fakeDashStore{}, &fakeHistoryStore{}, &fakeMemberships{err: expense.ErrForbidden}, &fakeExpenseReader{})
+	_, err := r.Query().TeamActivityFeed(contextWithUserID(uuid.New()), uuid.New().String(), nil, nil)
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want expense.ErrForbidden, got %v", err)
 	}
 }
 
@@ -165,8 +192,7 @@ func TestResolver_ExpenseHistory_ReturnsVersions(t *testing.T) {
 		},
 	}
 	r := newResolver(&fakeActivityStore{}, &fakeDashStore{}, hist)
-
-	versions, err := r.Query().ExpenseHistory(context.Background(), expenseID)
+	versions, err := r.Query().ExpenseHistory(contextWithUserID(uuid.New()), expenseID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,12 +211,20 @@ func TestResolver_ExpenseHistory_InvalidID_ReturnsError(t *testing.T) {
 
 func TestResolver_ExpenseHistory_Empty_ReturnsEmptySlice(t *testing.T) {
 	r := newResolver(&fakeActivityStore{}, &fakeDashStore{}, &fakeHistoryStore{versions: nil})
-	versions, err := r.Query().ExpenseHistory(context.Background(), uuid.New().String())
+	versions, err := r.Query().ExpenseHistory(contextWithUserID(uuid.New()), uuid.New().String())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if versions == nil {
 		t.Error("want empty slice, got nil")
+	}
+}
+
+func TestResolver_ExpenseHistory_ReadDeniedReturnsError(t *testing.T) {
+	r := graph.NewResolver(&fakeActivityStore{}, &fakeDashStore{}, &fakeHistoryStore{}, &fakeMemberships{}, &fakeExpenseReader{err: expense.ErrForbidden})
+	_, err := r.Query().ExpenseHistory(contextWithUserID(uuid.New()), uuid.New().String())
+	if !errors.Is(err, expense.ErrForbidden) {
+		t.Fatalf("want expense.ErrForbidden, got %v", err)
 	}
 }
 

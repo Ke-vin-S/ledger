@@ -26,6 +26,7 @@ var (
 	ErrInvalidSplitSum  = errors.New("split amounts do not sum to expense amount")
 	ErrInvalidSplitData = errors.New("invalid split data")
 	ErrInvalidInput     = errors.New("invalid input")
+	ErrVersionConflict  = errors.New("expense version conflict")
 )
 
 // Expense is the core financial event.
@@ -103,7 +104,7 @@ type CreateInput struct {
 	CategoryID  *uuid.UUID
 	PaidBy      uuid.UUID
 	ExpenseDate time.Time
-	SplitMethod *string    // nil for personal
+	SplitMethod *string // nil for personal
 	Splits      []SplitInput
 	BorrowerID  *uuid.UUID // required for direct scope
 	Note        *string

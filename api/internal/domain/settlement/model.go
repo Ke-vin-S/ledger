@@ -26,12 +26,13 @@ var validMethods = map[string]bool{
 }
 
 var (
-	ErrNotFound             = errors.New("settlement not found")
-	ErrForbidden            = errors.New("insufficient permission")
-	ErrInvalidInput         = errors.New("invalid input")
+	ErrNotFound              = errors.New("settlement not found")
+	ErrForbidden             = errors.New("insufficient permission")
+	ErrInvalidInput          = errors.New("invalid input")
 	ErrSettlementExceedsDebt = errors.New("settlement amount exceeds outstanding balance")
-	ErrInvalidStatus        = errors.New("settlement cannot be modified in its current status")
-	ErrNoDebt               = errors.New("no outstanding debt for this expense/debtor pair")
+	ErrInvalidStatus         = errors.New("settlement cannot be modified in its current status")
+	ErrNoDebt                = errors.New("no outstanding debt for this expense/debtor pair")
+	ErrInvalidPayee          = errors.New("settlement payee must be the expense creditor")
 )
 
 // Settlement records that a debtor paid a creditor some amount toward an expense.
@@ -52,6 +53,13 @@ type Settlement struct {
 	DisputeReason *string    `json:"dispute_reason,omitempty"`
 	SettledOn     time.Time  `json:"settled_on"`
 	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ExpenseAccess is the settlement authorization view of an expense.
+type ExpenseAccess struct {
+	ID     uuid.UUID
+	PaidBy uuid.UUID
+	TeamID *uuid.UUID
 }
 
 // DebtBalance is a row from the debt_balances view.

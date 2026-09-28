@@ -37,8 +37,8 @@ export function ExpenseCard({ expense, teamId, onClick }: Props) {
     <div
       onClick={onClick}
       className={cn(
-        "p-4 border rounded-xl bg-[hsl(var(--card))] shadow-sm transition-colors",
-        (onClick || teamId) && "cursor-pointer hover:bg-[hsl(var(--muted))]",
+        "p-4 border rounded-xl bg-card shadow-sm transition-colors",
+        (onClick || teamId) && "cursor-pointer hover:bg-muted",
         expense.is_void && "opacity-50",
       )}
     >
@@ -54,19 +54,19 @@ export function ExpenseCard({ expense, teamId, onClick }: Props) {
             )}
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">
+            <p className="text-xs text-muted-foreground">
               <DateDisplay iso={expense.expense_date} />
               {expense.split_method && ` · ${expense.split_method}`}
             </p>
             {(expense.paid_by_name) && (
               <div className="flex items-center gap-1">
-                <Avatar name={expense.paid_by_name} size="sm" className="h-3.5 w-3.5 text-[0.45rem]" />
-                <span className="text-xs text-[hsl(var(--muted-foreground))]">{expense.paid_by_name}</span>
+                <Avatar name={expense.paid_by_name} size="sm" className="h-3.5 w-3.5 text-xs" />
+                <span className="text-xs text-muted-foreground">{expense.paid_by_name}</span>
               </div>
             )}
           </div>
           {expense.splits && expense.splits.length > 0 && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               {expense.splits.length} participant{expense.splits.length !== 1 ? "s" : ""}
             </p>
           )}

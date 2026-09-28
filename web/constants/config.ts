@@ -61,7 +61,7 @@ export const PAGE_TITLES: Record<string, string> = {
 
 export const SETTLEMENT_STATUS_COLORS: Record<string, string> = {
   pending_confirmation:
-    "text-[hsl(var(--warning,40_96%_40%))] bg-amber-50 dark:bg-amber-950/30 border-amber-200",
-  confirmed: "text-[hsl(var(--primary))] bg-blue-50 dark:bg-blue-950/30 border-blue-200",
-  disputed: "text-[hsl(var(--destructive))] bg-red-50 dark:bg-red-950/30 border-red-200",
+    "text-pending bg-amber-50 dark:bg-amber-950/30 border-amber-200",
+  confirmed: "text-primary bg-lime-50 dark:bg-lime-950/30 border-lime-200",
+  disputed: "text-destructive bg-red-50 dark:bg-red-950/30 border-red-200",
 };

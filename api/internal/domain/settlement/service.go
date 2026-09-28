@@ -12,11 +12,12 @@ import (
 // Service implements all settlement business logic.
 type Service struct {
 	repo    Repository
+	teamGW  TeamGateway
 	auditor audit.Logger
 }
 
-func NewService(repo Repository, auditor audit.Logger) *Service {
-	return &Service{repo: repo, auditor: auditor}
+func NewService(repo Repository, teamGW TeamGateway, auditor audit.Logger) *Service {
+	return &Service{repo: repo, teamGW: teamGW, auditor: auditor}
 }
 
 // ── RecordSettlement ──────────────────────────────────────────────────────────
@@ -28,6 +29,19 @@ func (s *Service) RecordSettlement(ctx context.Context, actorID uuid.UUID, in Re
 	if !validMethods[in.Method] {
 		return nil, fmt.Errorf("%w: unknown method %q", ErrInvalidInput, in.Method)
 	}
+	if in.PayerID == in.PayeeID {
+		return nil, ErrInvalidInput
+	}
+	if in.Amount <= 0 {
+		return nil, fmt.Errorf("%w: amount must be positive", ErrInvalidInput)
+	}
+	expense, err := s.repo.FindExpense(ctx, in.ExpenseID)
+	if err != nil {
+		return nil, err
+	}
+	if in.PayeeID != expense.PaidBy {
+		return nil, ErrInvalidPayee
+	}
 
 	debt, err := s.repo.GetDebtBalance(ctx, in.ExpenseID, in.PayerID)
 	if err != nil {
@@ -37,7 +51,7 @@ func (s *Service) RecordSettlement(ctx context.Context, actorID uuid.UUID, in Re
 		return nil, fmt.Errorf("%w: amount %d exceeds balance %d", ErrSettlementExceedsDebt, in.Amount, debt.Balance)
 	}
 
-	created, err := s.repo.Create(ctx, &Settlement{
+	created, err := s.repo.RecordSettlementTx(ctx, &Settlement{
 		ExpenseID:  in.ExpenseID,
 		PayerID:    in.PayerID,
 		PayeeID:    in.PayeeID,
@@ -129,12 +143,61 @@ func (s *Service) DisputeSettlement(ctx context.Context, actorID, settlementID u
 
 // ── Balance queries ───────────────────────────────────────────────────────────
 
-func (s *Service) GetDebtBalance(ctx context.Context, expenseID, debtorID uuid.UUID) (*DebtBalance, error) {
+func (s *Service) GetDebtBalance(ctx context.Context, actorID, expenseID uuid.UUID, requestedDebtorID *uuid.UUID) (*DebtBalance, error) {
+	expense, _, err := s.authorizeExpenseRead(ctx, actorID, expenseID)
+	if err != nil {
+		return nil, err
+	}
+
+	debtorID := actorID
+	if requestedDebtorID != nil && *requestedDebtorID != actorID && s.isTeamAdmin(ctx, expense, actorID) {
+		debtorID = *requestedDebtorID
+	}
 	return s.repo.GetDebtBalance(ctx, expenseID, debtorID)
 }
 
-func (s *Service) ListSettlementsByExpense(ctx context.Context, expenseID uuid.UUID) ([]*Settlement, error) {
-	return s.repo.ListByExpense(ctx, expenseID)
+func (s *Service) ListSettlementsByExpense(ctx context.Context, actorID, expenseID uuid.UUID) ([]*Settlement, error) {
+	_, settlements, err := s.authorizeExpenseRead(ctx, actorID, expenseID)
+	if err != nil {
+		return nil, err
+	}
+	return settlements, nil
+}
+
+func (s *Service) authorizeExpenseRead(ctx context.Context, actorID, expenseID uuid.UUID) (*ExpenseAccess, []*Settlement, error) {
+	expense, err := s.repo.FindExpense(ctx, expenseID)
+	if err != nil {
+		return nil, nil, err
+	}
+	settlements, err := s.repo.ListByExpense(ctx, expenseID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if actorID == expense.PaidBy || s.isActiveTeamMember(ctx, expense, actorID) {
+		return expense, settlements, nil
+	}
+	for _, existing := range settlements {
+		if actorID == existing.PayerID || actorID == existing.PayeeID {
+			return expense, settlements, nil
+		}
+	}
+	return nil, nil, ErrForbidden
+}
+
+func (s *Service) isActiveTeamMember(ctx context.Context, expense *ExpenseAccess, actorID uuid.UUID) bool {
+	if expense.TeamID == nil || s.teamGW == nil {
+		return false
+	}
+	_, status, err := s.teamGW.GetMembership(ctx, *expense.TeamID, actorID)
+	return err == nil && status == "active"
+}
+
+func (s *Service) isTeamAdmin(ctx context.Context, expense *ExpenseAccess, actorID uuid.UUID) bool {
+	if expense.TeamID == nil || s.teamGW == nil {
+		return false
+	}
+	role, status, err := s.teamGW.GetMembership(ctx, *expense.TeamID, actorID)
+	return err == nil && status == "active" && (role == "admin" || role == "owner")
 }
 
 func (s *Service) ListTeamBalances(ctx context.Context, teamID, actorID uuid.UUID) ([]*TeamBalance, error) {

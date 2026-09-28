@@ -171,6 +171,13 @@ func (r *fakeTeamRepo) FindInviteLinkByHash(_ context.Context, tokenHash string)
 	return nil, errors.New("not found")
 }
 
+func (r *fakeTeamRepo) GetInviteLinkByID(_ context.Context, linkID uuid.UUID) (*team.InviteLink, error) {
+	if l, ok := r.links[linkID]; ok {
+		return l, nil
+	}
+	return nil, team.ErrInviteLinkInvalid
+}
+
 func (r *fakeTeamRepo) RevokeInviteLink(_ context.Context, linkID uuid.UUID) error {
 	if l, ok := r.links[linkID]; ok {
 		now := time.Now()
@@ -281,6 +288,9 @@ func (r *fakeUserRepo) Create(context.Context, *user.User) (*user.User, error) {
 func (r *fakeUserRepo) CreateAnonymous(context.Context, string, uuid.UUID) (*user.User, error) {
 	return nil, user.ErrNotFound
 }
+func (r *fakeUserRepo) GetAnonymousOwner(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, user.ErrNotFound
+}
 func (r *fakeUserRepo) FindByID(_ context.Context, id uuid.UUID) (*user.User, error) {
 	if u, ok := r.byID[id]; ok {
 		return u, nil
@@ -341,6 +351,17 @@ func (m *recordMailer) JoinRejected(_ context.Context, to, _, teamName string) e
 func (m *recordMailer) InviteLink(_ context.Context, to, teamName, rawToken string) error {
 	m.inviteLinks = append(m.inviteLinks, mailCall{to: to, teamName: teamName, extra: rawToken})
 	return nil
+}
+
+type recordingAuditor struct{ entries []audit.Entry }
+
+func (a *recordingAuditor) Log(_ context.Context, entry audit.Entry) error {
+	a.entries = append(a.entries, entry)
+	return nil
+}
+
+func newSvcWithAuditor(repo team.Repository, userRepo user.Repository, auditor audit.Logger) *team.Service {
+	return team.NewService(repo, userRepo, auditor, nil)
 }
 
 func newSvcWithMailer(repo team.Repository, userRepo user.Repository, mailer team.Mailer) *team.Service {
@@ -849,6 +870,57 @@ func TestRejectJoin_Admin_SetsRejected(t *testing.T) {
 	}
 }
 
+func TestApproveJoin_RejectsRequestFromAnotherTeam(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	teamA := seedTeam(repo, owner, true)
+	teamB := seedTeam(repo, owner, true)
+	req := addMember(repo, teamB.ID, uuid.New(), team.RoleMember, team.StatusRequested)
+
+	_, err := newSvc(repo, newFakeUserRepo()).ApproveJoin(context.Background(), teamA.ID, req.ID, owner)
+	if !errors.Is(err, team.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	if req.Status != team.StatusRequested {
+		t.Fatal("cross-team request was resolved")
+	}
+}
+
+func TestRejectJoin_RejectsRequestFromAnotherTeam(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	teamA := seedTeam(repo, owner, true)
+	teamB := seedTeam(repo, owner, true)
+	req := addMember(repo, teamB.ID, uuid.New(), team.RoleMember, team.StatusRequested)
+
+	_, err := newSvc(repo, newFakeUserRepo()).RejectJoin(context.Background(), teamA.ID, req.ID, owner)
+	if !errors.Is(err, team.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	if req.Status != team.StatusRequested {
+		t.Fatal("cross-team request was resolved")
+	}
+}
+
+func TestRevokeInviteLink_RejectsLinkFromAnotherTeam(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	teamA := seedTeam(repo, owner, false)
+	teamB := seedTeam(repo, owner, false)
+	link, _, err := newSvc(repo, newFakeUserRepo()).CreateInviteLink(context.Background(), teamB.ID, owner, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("create link: %v", err)
+	}
+
+	err = newSvc(repo, newFakeUserRepo()).RevokeInviteLink(context.Background(), teamA.ID, link.ID, owner)
+	if !errors.Is(err, team.ErrInviteLinkInvalid) {
+		t.Fatalf("want ErrInviteLinkInvalid, got %v", err)
+	}
+	if link.RevokedAt != nil {
+		t.Fatal("cross-team invite link was revoked")
+	}
+}
+
 // ── ChangeRole (the permission matrix + ownership transfer) ─────────────────────
 
 func TestChangeRole_OwnerPromotesMemberToAdmin(t *testing.T) {
@@ -1103,5 +1175,38 @@ func TestJoinViaInviteLink_AlreadyActive_AlreadyMember(t *testing.T) {
 	_, err = newSvc(repo, newFakeUserRepo()).JoinViaInviteLink(context.Background(), raw, owner)
 	if !errors.Is(err, team.ErrAlreadyMember) {
 		t.Fatalf("want ErrAlreadyMember, got %v", err)
+	}
+}
+
+func TestChangeRole_EmitsAuditEvent(t *testing.T) {
+	repo := newFakeRepo()
+	owner, target := uuid.New(), uuid.New()
+	tm := seedTeam(repo, owner, false)
+	addMember(repo, tm.ID, target, team.RoleMember, team.StatusActive)
+	auditor := &recordingAuditor{}
+
+	if _, err := newSvcWithAuditor(repo, newFakeUserRepo(), auditor).ChangeRole(context.Background(), tm.ID, target, owner, team.RoleAdmin); err != nil {
+		t.Fatalf("change role: %v", err)
+	}
+	if len(auditor.entries) != 1 || auditor.entries[0].Action != audit.ActionMemberRoleChanged {
+		t.Fatalf("unexpected audit entries: %+v", auditor.entries)
+	}
+}
+
+func TestInviteLinkLifecycle_EmitsAuditEvents(t *testing.T) {
+	repo := newFakeRepo()
+	owner := uuid.New()
+	tm := seedTeam(repo, owner, false)
+	auditor := &recordingAuditor{}
+	svc := newSvcWithAuditor(repo, newFakeUserRepo(), auditor)
+	link, _, err := svc.CreateInviteLink(context.Background(), tm.ID, owner, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("create link: %v", err)
+	}
+	if err := svc.RevokeInviteLink(context.Background(), tm.ID, link.ID, owner); err != nil {
+		t.Fatalf("revoke link: %v", err)
+	}
+	if len(auditor.entries) != 2 || auditor.entries[0].Action != audit.ActionInviteLinkCreated || auditor.entries[1].Action != audit.ActionInviteLinkRevoked {
+		t.Fatalf("unexpected audit entries: %+v", auditor.entries)
 	}
 }

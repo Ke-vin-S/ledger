@@ -64,7 +64,7 @@ lib/
   utils.ts           # formatAmount, formatDate
 hooks/               # React Query hooks — useTeam, useExpenses, useNotifications
 store/
-  ui.ts              # Zustand — sidebar, modals, theme
+  ui.ts              # Zustand — sidebar and theme
 ```
 
 ## Architecture

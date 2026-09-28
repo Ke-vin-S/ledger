@@ -28,7 +28,18 @@ func (s *Service) CreateLoan(ctx context.Context, in CreateInput) (*Loan, error)
 	if in.CounterpartyName == "" {
 		return nil, fmt.Errorf("%w: counterparty_name is required", ErrInvalidInput)
 	}
-	return s.repo.Create(ctx, in)
+	created, err := s.repo.Create(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionLoanCreated,
+		ActorID:    &created.UserID,
+		EntityType: "loan",
+		EntityID:   created.ID,
+		After:      created,
+	})
+	return created, nil
 }
 
 func (s *Service) GetLoan(ctx context.Context, actorID, loanID uuid.UUID) (*Loan, error) {

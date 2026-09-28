@@ -1,81 +1,108 @@
 "use client";
 
 import { useState } from "react";
-import { useMe, useUpdateProfile, useUpdateCurrencyPref } from "@/hooks/useAuth";
-import { ApiRequestError } from "@/lib/api";
-import { CURRENCIES } from "@/constants/config";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Skeleton } from "@/components/shared/Skeleton";
+import { Monitor, Moon, Sun } from "lucide-react";
+import {
+  useMe,
+  useUpdateCurrencyPref,
+  useUpdateProfile,
+} from "@/hooks/useAuth";
+import { ApiRequestError } from "@/lib/api";
+import { CURRENCIES } from "@/constants/config";
+import { useUIStore } from "@/store/ui";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { QueryBoundary } from "@/components/query-boundary";
+import { Avatar } from "@/components/shared/Avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar } from "@/components/shared/Avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
+import type { User } from "@/types/user.types";
 
 const profileSchema = z.object({
   display_name: z.string().min(1, "Name is required").max(80),
 });
 type ProfileValues = z.infer<typeof profileSchema>;
 
-function ProfileSection() {
-  const { data: me, isLoading } = useMe();
-  const { mutateAsync: updateProfile } = useUpdateProfile();
+function ProfileSection({ user }: { user: User }) {
+  const { mutateAsync: updateProfile, isPending } = useUpdateProfile();
+  const { toast } = useToast();
   const [serverError, setServerError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ProfileValues>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
-    values: { display_name: me?.display_name ?? "" },
+    values: { display_name: user.display_name },
   });
-
-  if (isLoading) return <Skeleton className="h-40" />;
 
   async function onSubmit(data: ProfileValues) {
     setServerError(null);
-    setSaved(false);
     try {
       await updateProfile(data);
-      setSaved(true);
+      toast({ title: "Profile updated", variant: "success" });
     } catch (err) {
-      if (err instanceof ApiRequestError) setServerError(err.error.message);
-      else setServerError("Failed to update profile.");
+      setServerError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to update profile.",
+      );
     }
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Profile</CardTitle>
+        <CardTitle>Profile</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center gap-4 mb-5">
-          <Avatar name={me?.display_name ?? "?"} src={me?.avatar_url ?? undefined} size="lg" />
+        <div className="mb-6 flex items-center gap-4">
+          <Avatar
+            name={user.display_name}
+            src={user.avatar_url ?? undefined}
+            size="lg"
+          />
           <div>
-            <p className="font-medium">{me?.display_name}</p>
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">{me?.email}</p>
+            <p className="font-semibold">{user.display_name}</p>
+            <p className="text-sm text-muted-foreground">{user.email}</p>
           </div>
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {serverError && (
-            <p className="text-sm text-[hsl(var(--destructive))]">{serverError}</p>
-          )}
-          {saved && (
-            <p className="text-sm text-[hsl(var(--positive))]">Saved!</p>
-          )}
+          {serverError ? (
+            <p
+              role="alert"
+              className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {serverError}
+            </p>
+          ) : null}
           <div className="space-y-1.5">
-            <Label htmlFor="display_name">Display name</Label>
-            <Input id="display_name" {...register("display_name")} />
-            {errors.display_name && (
-              <p className="text-xs text-[hsl(var(--destructive))]">
+            <Label htmlFor="settings-display-name">Display name</Label>
+            <Input
+              id="settings-display-name"
+              aria-invalid={errors.display_name ? true : undefined}
+              {...register("display_name")}
+            />
+            {errors.display_name ? (
+              <p className="text-xs text-destructive">
                 {errors.display_name.message}
               </p>
-            )}
+            ) : null}
           </div>
-          <Button type="submit" size="sm" disabled={isSubmitting}>
-            {isSubmitting ? "Saving…" : "Save changes"}
+          <Button type="submit" disabled={isPending}>
+            {isPending ? "Saving…" : "Save profile"}
           </Button>
         </form>
       </CardContent>
@@ -83,82 +110,132 @@ function ProfileSection() {
   );
 }
 
-function CurrencySection() {
-  const { data: me, isLoading } = useMe();
-  const { mutateAsync: updateCurrencyPref, isPending: saving } = useUpdateCurrencyPref();
-  const [saved, setSaved] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string>("");
+function CurrencySection({ user }: { user: User }) {
+  const { mutateAsync: updateCurrencyPref, isPending } =
+    useUpdateCurrencyPref();
+  const { toast } = useToast();
+  const [selected, setSelected] = useState(user.currency_pref);
+  const [error, setError] = useState<string | null>(null);
 
-  const currentCurrency = me?.currency_pref ?? "LKR";
-
-  if (isLoading) return <Skeleton className="h-28" />;
-
-  async function handleSave() {
-    if (!selected || selected === currentCurrency) return;
-    setSaved(false);
-    setServerError(null);
+  async function saveCurrency() {
+    if (selected === user.currency_pref) return;
+    setError(null);
     try {
       await updateCurrencyPref(selected);
-      setSaved(true);
-      setSelected("");
+      toast({ title: "Default currency updated", variant: "success" });
     } catch (err) {
-      if (err instanceof ApiRequestError) setServerError(err.error.message);
-      else setServerError("Failed to update currency.");
+      setError(
+        err instanceof ApiRequestError
+          ? err.error.message
+          : "Failed to update currency.",
+      );
     }
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Default currency</CardTitle>
+        <CardTitle>Preferences</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Used as the default when adding expenses. You can always change it per expense.
-        </p>
-        {serverError && (
-          <p className="text-sm text-[hsl(var(--destructive))]">{serverError}</p>
-        )}
-        {saved && (
-          <p className="text-sm text-[hsl(var(--positive))]">Currency preference saved!</p>
-        )}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 space-y-1.5">
-            <Label>Currency</Label>
-            <Select defaultValue={currentCurrency} onValueChange={setSelected}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURRENCIES.map(({ code, label }) => (
-                  <SelectItem key={code} value={code}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            size="sm"
-            className="mt-6"
-            disabled={saving || !selected || selected === currentCurrency}
-            onClick={handleSave}
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
+      <CardContent className="space-y-6">
+        <div className="space-y-1.5">
+          <Label htmlFor="settings-currency">Default currency</Label>
+          <Select value={selected} onValueChange={setSelected}>
+            <SelectTrigger id="settings-currency">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CURRENCIES.map(({ code, label }) => (
+                <SelectItem key={code} value={code}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Used by default when adding expenses. You can still change it per
+            expense.
+          </p>
         </div>
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">
-          Current: <span className="font-medium text-[hsl(var(--foreground))]">{currentCurrency}</span>
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            onClick={saveCurrency}
+            disabled={isPending || selected === user.currency_pref}
+          >
+            {isPending ? "Saving…" : "Save currency"}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Current: {user.currency_pref}
+          </span>
+        </div>
+        <div className="space-y-2">
+          <Label>Theme</Label>
+          <div
+            className="grid grid-cols-3 gap-2"
+            role="group"
+            aria-label="Theme"
+          >
+            <ThemeButton value="light" label="Light" icon={Sun} />
+            <ThemeButton value="dark" label="Dark" icon={Moon} />
+            <ThemeButton value="system" label="System" icon={Monitor} />
+          </div>
+        </div>
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {error}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
-export default function SettingsPage() {
+function ThemeButton({
+  value,
+  label,
+  icon: Icon,
+}: {
+  value: "light" | "dark" | "system";
+  label: string;
+  icon: typeof Sun;
+}) {
+  const theme = useUIStore((state) => state.theme);
+  const setTheme = useUIStore((state) => state.setTheme);
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-2xl">
-      <ProfileSection />
-      <CurrencySection />
-    </div>
+    <Button
+      type="button"
+      variant={theme === value ? "default" : "outline"}
+      aria-pressed={theme === value}
+      onClick={() => setTheme(value)}
+      className="w-full"
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      {label}
+    </Button>
+  );
+}
+
+export default function SettingsPage() {
+  const query = useMe();
+  return (
+    <main className="mx-auto max-w-3xl space-y-8 p-4 md:p-8">
+      <PageHeader
+        eyebrow="Your account"
+        title="Settings"
+        description="Keep your profile, defaults, and viewing preferences in one place."
+      />
+      <QueryBoundary {...query} isEmpty={() => false} className="min-h-64">
+        {(user) => (
+          <div className="grid gap-6 md:grid-cols-2">
+            <ProfileSection user={user} />
+            <CurrencySection user={user} />
+          </div>
+        )}
+      </QueryBoundary>
+    </main>
   );
 }

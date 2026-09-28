@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Settlement, Balance } from "@/types/settlement.types";
 import { API_ENDPOINTS } from "@/constants/api";
+import { invalidateExpenseGraph } from "@/lib/queryKeys";
 
 export function useExpenseSettlements(expenseId: string) {
   return useQuery<Settlement[]>({
@@ -47,26 +48,24 @@ export function useRecordSettlement(teamId: string, expenseId: string) {
   });
 }
 
-export function useConfirmSettlement() {
+export function useConfirmSettlement(teamId: string, expenseId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (settlementId: string) =>
       api.post(API_ENDPOINTS.settlements.confirm(settlementId)),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["balances"] });
-      qc.invalidateQueries({ queryKey: ["expenses"] });
+      invalidateExpenseGraph(qc, { teamId, expenseId });
     },
   });
 }
 
-export function useDisputeSettlement() {
+export function useDisputeSettlement(teamId: string, expenseId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ settlementId, reason }: { settlementId: string; reason?: string }) =>
       api.post(API_ENDPOINTS.settlements.dispute(settlementId), { reason }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["balances"] });
-      qc.invalidateQueries({ queryKey: ["expenses"] });
+      invalidateExpenseGraph(qc, { teamId, expenseId });
     },
   });
 }

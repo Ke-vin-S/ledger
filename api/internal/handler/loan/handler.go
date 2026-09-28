@@ -1,7 +1,6 @@
 package loan
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -185,7 +184,9 @@ func (h *Handler) dispute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body disputeBody
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if !handler.Decode(w, r, &body) {
+		return
+	}
 
 	l, svcErr := h.svc.DisputeLoan(r.Context(), actorID, id, body.Reason)
 	if svcErr != nil {

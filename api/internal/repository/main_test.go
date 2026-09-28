@@ -111,8 +111,8 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE audit_log, notifications, notification_prefs, expense_flags,
 		         settlements, expense_splits, expense_versions, expenses,
-		         invite_links, team_members, teams, claim_tokens, oauth_accounts,
-		         loan_repayments, loans, users
+		         invite_links, team_members, teams, claim_tokens, anonymous_users,
+		         oauth_accounts, loan_repayments, loans, users
 		RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)

@@ -428,7 +428,10 @@ func (s *Service) ApproveJoin(ctx context.Context, teamID uuid.UUID, requestID, 
 		return nil, err
 	}
 	req, err := s.repo.GetMemberByID(ctx, requestID)
-	if err != nil || req.Status != StatusRequested {
+	if err != nil || req.TeamID != teamID {
+		return nil, ErrNotFound
+	}
+	if req.Status != StatusRequested {
 		return nil, fmt.Errorf("join request not found or already resolved")
 	}
 	now := time.Now()
@@ -477,7 +480,10 @@ func (s *Service) RejectJoin(ctx context.Context, teamID uuid.UUID, requestID, a
 		return nil, err
 	}
 	req, err := s.repo.GetMemberByID(ctx, requestID)
-	if err != nil || req.Status != StatusRequested {
+	if err != nil || req.TeamID != teamID {
+		return nil, ErrNotFound
+	}
+	if req.Status != StatusRequested {
 		return nil, fmt.Errorf("join request not found or already resolved")
 	}
 	now := time.Now()
@@ -511,6 +517,7 @@ func (s *Service) ChangeRole(ctx context.Context, teamID, targetUserID, requeste
 	if err != nil {
 		return nil, ErrNotMember
 	}
+	before := *target
 	if target.Status != StatusActive {
 		return nil, fmt.Errorf("member is not active")
 	}
@@ -541,6 +548,15 @@ func (s *Service) ChangeRole(ctx context.Context, teamID, targetUserID, requeste
 	if err != nil {
 		return nil, err
 	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionMemberRoleChanged,
+		ActorID:    &requesterID,
+		TeamID:     &teamID,
+		EntityType: "team_member",
+		EntityID:   m.ID,
+		Before:     &before,
+		After:      m,
+	})
 	return m, nil
 }
 
@@ -619,6 +635,14 @@ func (s *Service) CreateInviteLink(ctx context.Context, teamID, createdBy uuid.U
 	if err != nil {
 		return nil, "", err
 	}
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionInviteLinkCreated,
+		ActorID:    &createdBy,
+		TeamID:     &teamID,
+		EntityType: "invite_link",
+		EntityID:   created.ID,
+		After:      created,
+	})
 	if s.mailer != nil && email != nil {
 		if to := strings.TrimSpace(*email); to != "" {
 			if t, err := s.repo.FindByID(ctx, teamID); err == nil {
@@ -642,7 +666,27 @@ func (s *Service) RevokeInviteLink(ctx context.Context, teamID, linkID, requeste
 	if _, err := s.requireMembership(ctx, teamID, requesterID, RoleAdmin); err != nil {
 		return err
 	}
-	return s.repo.RevokeInviteLink(ctx, linkID)
+	link, err := s.repo.GetInviteLinkByID(ctx, linkID)
+	if err != nil || link.TeamID != teamID {
+		return ErrInviteLinkInvalid
+	}
+	before := *link
+	if err := s.repo.RevokeInviteLink(ctx, linkID); err != nil {
+		return err
+	}
+	after := *link
+	now := time.Now()
+	after.RevokedAt = &now
+	_ = s.auditor.Log(ctx, audit.Entry{
+		Action:     audit.ActionInviteLinkRevoked,
+		ActorID:    &requesterID,
+		TeamID:     &teamID,
+		EntityType: "invite_link",
+		EntityID:   link.ID,
+		Before:     &before,
+		After:      &after,
+	})
+	return nil
 }
 
 // JoinViaInviteLink adds the user to the team via an invite link token.
@@ -715,6 +759,12 @@ func (s *Service) requireMembership(ctx context.Context, teamID, userID uuid.UUI
 		return nil, ErrInsufficientRole
 	}
 	return m, nil
+}
+
+// RequireMembership exposes the canonical active-role check to adjacent domains.
+func (s *Service) RequireMembership(ctx context.Context, teamID, userID uuid.UUID, minRole string) error {
+	_, err := s.requireMembership(ctx, teamID, userID, minRole)
+	return err
 }
 
 func validateRoleChange(requesterRole, targetCurrentRole, newRole string) error {

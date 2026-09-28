@@ -127,6 +127,9 @@ func (r *fakeTeamRepo) ListInviteLinks(_ context.Context, _ uuid.UUID) ([]*team.
 func (r *fakeTeamRepo) FindInviteLinkByHash(_ context.Context, _ string) (*team.InviteLink, error) {
 	return nil, errors.New("not found")
 }
+func (r *fakeTeamRepo) GetInviteLinkByID(_ context.Context, _ uuid.UUID) (*team.InviteLink, error) {
+	return nil, team.ErrInviteLinkInvalid
+}
 func (r *fakeTeamRepo) RevokeInviteLink(_ context.Context, _ uuid.UUID) error { return nil }
 func (r *fakeTeamRepo) IncrementInviteLinkUse(_ context.Context, _ uuid.UUID, _ *time.Time) error {
 	return nil
@@ -196,6 +199,9 @@ func (stubUserRepo) FindByEmail(context.Context, string) (*user.User, error) {
 func (stubUserRepo) Create(context.Context, *user.User) (*user.User, error) { return nil, nil }
 func (stubUserRepo) CreateAnonymous(context.Context, string, uuid.UUID) (*user.User, error) {
 	return nil, nil
+}
+func (stubUserRepo) GetAnonymousOwner(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, user.ErrNotFound
 }
 func (stubUserRepo) FindByID(context.Context, uuid.UUID) (*user.User, error) {
 	return nil, user.ErrNotFound

@@ -19,6 +19,7 @@ describe("SplitBuilder — equal", () => {
         method="equal"
         value={[]}
         onChange={() => {}}
+        onValidityChange={() => {}}
       />,
     );
     expect(screen.getByText("LKR 15.01")).toBeInTheDocument();
@@ -34,6 +35,7 @@ describe("SplitBuilder — equal", () => {
         method="equal"
         value={[]}
         onChange={() => {}}
+        onValidityChange={() => {}}
       />,
     );
     expect(screen.getAllByText("LKR 15.00")).toHaveLength(2);
@@ -49,6 +51,7 @@ describe("SplitBuilder — equal", () => {
         method="equal"
         value={[]}
         onChange={onChange}
+        onValidityChange={() => {}}
       />,
     );
     expect(onChange).toHaveBeenCalledWith([{ user_id: "u1" }, { user_id: "u2" }]);
@@ -66,6 +69,7 @@ describe("SplitBuilder — percentage", () => {
         method="percentage"
         value={[]}
         onChange={onChange}
+        onValidityChange={() => {}}
       />,
     );
     // Even split: 50% each → 50.00 of 100.00.
@@ -74,6 +78,24 @@ describe("SplitBuilder — percentage", () => {
       { user_id: "u1", share_units: 50 },
       { user_id: "u2", share_units: 50 },
     ]);
+  });
+});
+
+describe("SplitBuilder — exact", () => {
+  it("reports an invalid total to the submit owner", () => {
+    const onValidityChange = vi.fn();
+    render(
+      <SplitBuilder
+        participants={participants}
+        total={3000}
+        currency="LKR"
+        method="exact"
+        value={[]}
+        onChange={() => {}}
+        onValidityChange={onValidityChange}
+      />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(false, "+LKR 30.00 remaining");
   });
 });
 
@@ -86,6 +108,7 @@ describe("SplitBuilder — empty", () => {
         currency="LKR"
         method="equal"
         value={[]}
+        onValidityChange={() => {}}
         onChange={() => {}}
       />,
     );

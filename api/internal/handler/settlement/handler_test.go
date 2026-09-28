@@ -13,8 +13,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/audit"
+	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/settlement"
 )
 
@@ -32,9 +32,21 @@ func authAs(userID uuid.UUID) func(http.Handler) http.Handler {
 }
 
 type fakeRepo struct {
-	stored  *settlement.Settlement
-	balance *settlement.DebtBalance
-	balErr  error
+	stored          *settlement.Settlement
+	expense         *settlement.ExpenseAccess
+	balance         *settlement.DebtBalance
+	balErr          error
+	balanceDebtorID uuid.UUID
+}
+
+type fakeTeamGateway struct {
+	role   string
+	status string
+	err    error
+}
+
+func (g *fakeTeamGateway) GetMembership(_ context.Context, _, _ uuid.UUID) (string, string, error) {
+	return g.role, g.status, g.err
 }
 
 func (r *fakeRepo) Create(_ context.Context, s *settlement.Settlement) (*settlement.Settlement, error) {
@@ -42,6 +54,10 @@ func (r *fakeRepo) Create(_ context.Context, s *settlement.Settlement) (*settlem
 	s.CreatedAt = time.Now()
 	r.stored = s
 	return s, nil
+}
+
+func (r *fakeRepo) RecordSettlementTx(_ context.Context, s *settlement.Settlement) (*settlement.Settlement, error) {
+	return r.Create(context.Background(), s)
 }
 
 func (r *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*settlement.Settlement, error) {
@@ -56,6 +72,13 @@ func (r *fakeRepo) ListByExpense(_ context.Context, _ uuid.UUID) ([]*settlement.
 		return nil, nil
 	}
 	return []*settlement.Settlement{r.stored}, nil
+}
+
+func (r *fakeRepo) FindExpense(_ context.Context, _ uuid.UUID) (*settlement.ExpenseAccess, error) {
+	if r.expense != nil {
+		return r.expense, nil
+	}
+	return nil, settlement.ErrNotFound
 }
 
 func (r *fakeRepo) Confirm(_ context.Context, id, confirmedBy uuid.UUID) (*settlement.Settlement, error) {
@@ -77,7 +100,8 @@ func (r *fakeRepo) Dispute(_ context.Context, id, disputedBy uuid.UUID, reason s
 	return r.stored, nil
 }
 
-func (r *fakeRepo) GetDebtBalance(_ context.Context, _, _ uuid.UUID) (*settlement.DebtBalance, error) {
+func (r *fakeRepo) GetDebtBalance(_ context.Context, _ uuid.UUID, debtorID uuid.UUID) (*settlement.DebtBalance, error) {
+	r.balanceDebtorID = debtorID
 	if r.balErr != nil {
 		return nil, r.balErr
 	}
@@ -92,9 +116,12 @@ func (r *fakeRepo) ListUserNetBalances(_ context.Context, _ uuid.UUID) ([]*settl
 	return nil, nil
 }
 
-// router wires the settlement handler the same way main.go does, with a test auth middleware.
 func router(repo settlement.Repository, actor uuid.UUID) http.Handler {
-	svc := settlement.NewService(repo, audit.NopLogger())
+	return routerWithTeam(repo, actor, &fakeTeamGateway{})
+}
+
+func routerWithTeam(repo settlement.Repository, actor uuid.UUID, teamGW settlement.TeamGateway) http.Handler {
+	svc := settlement.NewService(repo, teamGW, audit.NopLogger())
 	h := New(svc)
 	root := chi.NewRouter()
 	root.Mount("/expenses/{expenseId}/settlements", h.ExpenseRoutes(authAs(actor)))
@@ -134,7 +161,7 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func TestRecordSettlement_Valid_201(t *testing.T) {
 	actor, payee := uuid.New(), uuid.New()
-	repo := &fakeRepo{balance: &settlement.DebtBalance{Balance: 5000}}
+	repo := &fakeRepo{expense: &settlement.ExpenseAccess{ID: uuid.New(), PaidBy: payee}, balance: &settlement.DebtBalance{Balance: 5000}}
 	h := router(repo, actor)
 
 	rec := doJSON(t, h, http.MethodPost, "/expenses/"+uuid.New().String()+"/settlements", recordBody{
@@ -161,7 +188,7 @@ func TestRecordSettlement_Valid_201(t *testing.T) {
 
 func TestRecordSettlement_ExceedsDebt_409(t *testing.T) {
 	actor, payee := uuid.New(), uuid.New()
-	repo := &fakeRepo{balance: &settlement.DebtBalance{Balance: 2000}}
+	repo := &fakeRepo{expense: &settlement.ExpenseAccess{ID: uuid.New(), PaidBy: payee}, balance: &settlement.DebtBalance{Balance: 2000}}
 	h := router(repo, actor)
 
 	rec := doJSON(t, h, http.MethodPost, "/expenses/"+uuid.New().String()+"/settlements", recordBody{
@@ -182,7 +209,7 @@ func TestRecordSettlement_ExceedsDebt_409(t *testing.T) {
 
 func TestRecordSettlement_ThirdParty_403(t *testing.T) {
 	actor, payer, payee := uuid.New(), uuid.New(), uuid.New()
-	repo := &fakeRepo{balance: &settlement.DebtBalance{Balance: 5000}}
+	repo := &fakeRepo{expense: &settlement.ExpenseAccess{ID: uuid.New(), PaidBy: payee}, balance: &settlement.DebtBalance{Balance: 5000}}
 	h := router(repo, actor) // actor is neither payer nor payee
 
 	rec := doJSON(t, h, http.MethodPost, "/expenses/"+uuid.New().String()+"/settlements", recordBody{
@@ -233,6 +260,93 @@ func TestRecordSettlement_BadDate_400(t *testing.T) {
 	}
 	if code := errorCode(t, rec); code != "INVALID_INPUT" {
 		t.Errorf("error code = %q, want INVALID_INPUT", code)
+	}
+}
+
+func TestRecordSettlement_NonCreditorPayee_422(t *testing.T) {
+	actor, creditor, accomplice := uuid.New(), uuid.New(), uuid.New()
+	expenseID := uuid.New()
+	repo := &fakeRepo{
+		expense: &settlement.ExpenseAccess{ID: expenseID, PaidBy: creditor},
+		balance: &settlement.DebtBalance{Balance: 5000},
+	}
+	h := router(repo, actor)
+
+	rec := doJSON(t, h, http.MethodPost, "/expenses/"+expenseID.String()+"/settlements", recordBody{
+		PayerID:   actor.String(),
+		PayeeID:   accomplice.String(),
+		Amount:    1000,
+		Method:    "cash",
+		SettledOn: "2026-01-15",
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := errorCode(t, rec); code != "INVALID_PAYEE" {
+		t.Fatalf("error code = %q, want INVALID_PAYEE", code)
+	}
+}
+
+// ── list / balance authorization ───────────────────────────────────────────────
+
+func TestListSettlements_UnrelatedActorForbidden(t *testing.T) {
+	payer, payee := uuid.New(), uuid.New()
+	s := seedPending(&fakeRepo{}, payer, payee)
+	repo := &fakeRepo{stored: s, expense: &settlement.ExpenseAccess{ID: s.ExpenseID, PaidBy: payer}}
+	h := router(repo, uuid.New())
+
+	rec := doJSON(t, h, http.MethodGet, "/expenses/"+s.ExpenseID.String()+"/settlements", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListSettlements_TeamMemberAllowed(t *testing.T) {
+	payer, payee := uuid.New(), uuid.New()
+	s := seedPending(&fakeRepo{}, payer, payee)
+	teamID := uuid.New()
+	repo := &fakeRepo{stored: s, expense: &settlement.ExpenseAccess{ID: s.ExpenseID, PaidBy: payer, TeamID: &teamID}}
+	h := routerWithTeam(repo, uuid.New(), &fakeTeamGateway{role: "member", status: "active"})
+
+	rec := doJSON(t, h, http.MethodGet, "/expenses/"+s.ExpenseID.String()+"/settlements", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDebtBalance_DebtorOverrideIgnoredForNonAdmin(t *testing.T) {
+	actor := uuid.New()
+	expenseID := uuid.New()
+	repo := &fakeRepo{
+		expense: &settlement.ExpenseAccess{ID: expenseID, PaidBy: actor},
+		balance: &settlement.DebtBalance{Balance: 5000},
+	}
+	h := router(repo, actor)
+
+	rec := doJSON(t, h, http.MethodGet, "/expenses/"+expenseID.String()+"/settlements/balance?debtor_id="+uuid.New().String(), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.balanceDebtorID != actor {
+		t.Fatalf("queried debtor = %v, want actor %v", repo.balanceDebtorID, actor)
+	}
+}
+
+func TestDebtBalance_DebtorOverrideAllowedForAdmin(t *testing.T) {
+	admin, debtor := uuid.New(), uuid.New()
+	expenseID, teamID := uuid.New(), uuid.New()
+	repo := &fakeRepo{
+		expense: &settlement.ExpenseAccess{ID: expenseID, PaidBy: admin, TeamID: &teamID},
+		balance: &settlement.DebtBalance{Balance: 5000},
+	}
+	h := routerWithTeam(repo, admin, &fakeTeamGateway{role: "admin", status: "active"})
+
+	rec := doJSON(t, h, http.MethodGet, "/expenses/"+expenseID.String()+"/settlements/balance?debtor_id="+debtor.String(), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.balanceDebtorID != debtor {
+		t.Fatalf("queried debtor = %v, want requested debtor %v", repo.balanceDebtorID, debtor)
 	}
 }
 

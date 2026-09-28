@@ -4,13 +4,6 @@ import { create } from "zustand";
 
 type Theme = "light" | "dark" | "system";
 
-type Modal =
-  | { type: "create-expense"; teamId: string }
-  | { type: "create-team" }
-  | { type: "invite-member"; teamId: string }
-  | { type: "record-settlement"; expenseId: string }
-  | { type: "expense-detail"; expenseId: string };
-
 type UIStore = {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
@@ -18,11 +11,6 @@ type UIStore = {
 
   theme: Theme;
   setTheme: (theme: Theme) => void;
-
-  modals: Modal[];
-  openModal: (modal: Modal) => void;
-  closeModal: () => void;
-  closeAllModals: () => void;
 };
 
 function getInitialTheme(): Theme {
@@ -52,9 +40,4 @@ export const useUIStore = create<UIStore>((set) => ({
       root.classList.toggle("dark", prefersDark);
     }
   },
-
-  modals: [],
-  openModal: (modal) => set((s) => ({ modals: [...s.modals, modal] })),
-  closeModal: () => set((s) => ({ modals: s.modals.slice(0, -1) })),
-  closeAllModals: () => set({ modals: [] }),
 }));

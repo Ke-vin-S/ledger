@@ -31,6 +31,7 @@ type Repository interface {
 	CreateInviteLink(ctx context.Context, l *InviteLink) (*InviteLink, error)
 	ListInviteLinks(ctx context.Context, teamID uuid.UUID) ([]*InviteLink, error)
 	FindInviteLinkByHash(ctx context.Context, tokenHash string) (*InviteLink, error)
+	GetInviteLinkByID(ctx context.Context, linkID uuid.UUID) (*InviteLink, error)
 	RevokeInviteLink(ctx context.Context, linkID uuid.UUID) error
 	IncrementInviteLinkUse(ctx context.Context, linkID uuid.UUID, expiresAt *time.Time) error
 

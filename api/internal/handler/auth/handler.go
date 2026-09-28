@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -15,18 +16,22 @@ import (
 	jwtauth "github.com/Ke-vin-S/ledger/api/internal/auth"
 	"github.com/Ke-vin-S/ledger/api/internal/domain/user"
 	"github.com/Ke-vin-S/ledger/api/internal/handler"
+	"github.com/Ke-vin-S/ledger/api/internal/logger"
+	"go.uber.org/zap"
 )
 
 const refreshCookie = "refresh_token"
 
 type Handler struct {
-	users              *user.Service
-	jwt                *jwtauth.JWTService
-	tokens             *jwtauth.TokenStore
-	resetStore         *jwtauth.ResetStore
-	isLocal            bool
-	googleClientID     string
-	googleClientSecret string
+	users                         *user.Service
+	jwt                           *jwtauth.JWTService
+	tokens                        *jwtauth.TokenStore
+	resetStore                    *jwtauth.ResetStore
+	isLocal                       bool
+	googleClientID                string
+	googleClientSecret            string
+	credentialRateLimitMiddleware func(http.Handler) http.Handler
+	refreshRateLimitMiddleware    func(http.Handler) http.Handler
 }
 
 func New(
@@ -37,15 +42,19 @@ func New(
 	isLocal bool,
 	googleClientID string,
 	googleClientSecret string,
+	credentialRateLimitMiddleware func(http.Handler) http.Handler,
+	refreshRateLimitMiddleware func(http.Handler) http.Handler,
 ) *Handler {
 	return &Handler{
-		users:              users,
-		jwt:                jwt,
-		tokens:             tokens,
-		resetStore:         resetStore,
-		isLocal:            isLocal,
-		googleClientID:     googleClientID,
-		googleClientSecret: googleClientSecret,
+		users:                         users,
+		jwt:                           jwt,
+		tokens:                        tokens,
+		resetStore:                    resetStore,
+		isLocal:                       isLocal,
+		googleClientID:                googleClientID,
+		googleClientSecret:            googleClientSecret,
+		credentialRateLimitMiddleware: credentialRateLimitMiddleware,
+		refreshRateLimitMiddleware:    refreshRateLimitMiddleware,
 	}
 }
 
@@ -53,10 +62,10 @@ func New(
 func (h *Handler) Routes(authMiddleware func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 	r.Post("/register", h.Register)
-	r.Post("/login", h.Login)
-	r.Post("/oauth/google", h.OAuthGoogle)
-	r.Post("/refresh", h.Refresh)
-	r.Post("/password/reset-request", h.PasswordResetRequest)
+	r.With(h.credentialRateLimitMiddleware).Post("/login", h.Login)
+	r.With(h.credentialRateLimitMiddleware).Post("/oauth/google", h.OAuthGoogle)
+	r.With(h.refreshRateLimitMiddleware).Post("/refresh", h.Refresh)
+	r.With(h.credentialRateLimitMiddleware).Post("/password/reset-request", h.PasswordResetRequest)
 	r.Post("/password/reset", h.PasswordReset)
 
 	// Logout requires a valid JWT to identify the user for family invalidation.
@@ -199,7 +208,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if rawToken := tokenFromCookieOrBody(r); rawToken != "" {
 		_ = h.tokens.Revoke(r.Context(), rawToken)
 	}
-	clearRefreshCookie(w)
+	clearRefreshCookie(w, h.isLocal)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -242,12 +251,12 @@ func (h *Handler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.users.ResetPassword(r.Context(), body.Token, body.NewPassword, h.resetStore); err != nil {
-		switch err {
-		case user.ErrInvalidResetToken:
+		if err == user.ErrInvalidResetToken {
 			handler.Error(w, r, http.StatusBadRequest, "CLAIM_TOKEN_EXPIRED", "reset token is invalid or expired")
-		default:
-			handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
 		}
+		logger.FromContext(r.Context()).Error("password reset failed", zap.Error(err))
+		handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to reset password")
 		return
 	}
 	handler.JSON(w, r, http.StatusOK, map[string]string{"message": "Password updated successfully."})
@@ -279,6 +288,10 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, u *user.Us
 }
 
 func setRefreshCookie(w http.ResponseWriter, token string, isLocal bool) {
+	sameSite := http.SameSiteStrictMode
+	if !isLocal {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookie,
 		Value:    token,
@@ -286,17 +299,23 @@ func setRefreshCookie(w http.ResponseWriter, token string, isLocal bool) {
 		MaxAge:   int(jwtauth.RefreshTokenTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   !isLocal,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
 	})
 }
 
-func clearRefreshCookie(w http.ResponseWriter) {
+func clearRefreshCookie(w http.ResponseWriter, isLocal bool) {
+	sameSite := http.SameSiteStrictMode
+	if !isLocal {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   !isLocal,
+		SameSite: sameSite,
 	})
 }
 
@@ -319,7 +338,8 @@ func (h *Handler) handleUserError(w http.ResponseWriter, r *http.Request, err er
 	case user.ErrInvalidCredentials:
 		handler.Error(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "email or password is incorrect")
 	default:
-		handler.Error(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		logger.FromContext(r.Context()).Error("authentication request failed", zap.Error(err))
+		handler.Error(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "authentication request failed")
 	}
 }
 
@@ -329,11 +349,14 @@ var (
 	googleUserInfoEndpoint = "https://www.googleapis.com/oauth2/v3/userinfo"
 )
 
+var googleOAuthClient = &http.Client{Timeout: 5 * time.Second}
+
 type googleUserInfo struct {
-	Sub     string `json:"sub"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+	Sub           string `json:"sub"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	EmailVerified bool   `json:"email_verified"`
+	Picture       string `json:"picture"`
 }
 
 // exchangeGoogleCode exchanges an authorization code for user info using the
@@ -355,7 +378,7 @@ func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret string
 	}
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	tokenResp, err := googleOAuthClient.Do(tokenReq)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -382,7 +405,7 @@ func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret string
 	}
 	infoReq.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
 
-	infoResp, err := http.DefaultClient.Do(infoReq)
+	infoResp, err := googleOAuthClient.Do(infoReq)
 	if err != nil {
 		return nil, fmt.Errorf("userinfo request: %w", err)
 	}
@@ -399,6 +422,8 @@ func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret string
 	if info.Sub == "" {
 		return nil, fmt.Errorf("missing sub in userinfo")
 	}
+	if !info.EmailVerified {
+		return nil, fmt.Errorf("google email is not verified")
+	}
 	return &info, nil
 }
-

@@ -49,7 +49,7 @@ export function Avatar({ name, src, size = "md", className }: Props) {
 
   return (
     <div
-      className={cn(base, "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]")}
+      className={cn(base, "bg-muted text-muted-foreground")}
       title={name}
     >
       {initials(name)}

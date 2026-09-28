@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +22,53 @@ func NewNotificationRepo(pool *pgxpool.Pool) notification.Repository {
 	return &notificationRepo{pool: pool}
 }
 
+// Create fans out a notification to recipients whose preferences allow its type.
+func (r *notificationRepo) Create(ctx context.Context, recipientIDs []uuid.UUID, notificationType, entityType string, entityID *uuid.UUID, payload map[string]any) error {
+	if len(recipientIDs) == 0 {
+		return nil
+	}
+	if entityID == nil {
+		return fmt.Errorf("entity_id is required")
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO notifications (user_id, type, entity_type, entity_id, payload)
+		SELECT recipient_id, $2, $3, $4, $5
+		FROM UNNEST($1::uuid[]) AS recipient_id
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM notification_prefs np
+			WHERE np.user_id = recipient_id
+			  AND $2 = ANY(np.disabled_types)
+		)
+	`, recipientIDs, notificationType, entityType, *entityID, payload)
+	return err
+}
+
+// createTx is the transactional form used by repositories that own the business write.
+func createTx(ctx context.Context, tx pgx.Tx, recipientIDs []uuid.UUID, notificationType, entityType string, entityID uuid.UUID, payload map[string]any) error {
+	if len(recipientIDs) == 0 {
+		return nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO notifications (user_id, type, entity_type, entity_id, payload)
+		SELECT recipient_id, $2, $3, $4, $5
+		FROM UNNEST($1::uuid[]) AS recipient_id
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM notification_prefs np
+			WHERE np.user_id = recipient_id
+			  AND $2 = ANY(np.disabled_types)
+		)
+	`, recipientIDs, notificationType, entityType, entityID, payload)
+	return err
+}
+
 // ── List ──────────────────────────────────────────────────────────────────────
 
 func (r *notificationRepo) List(ctx context.Context, p notification.ListParams) ([]*notification.Notification, error) {
@@ -34,13 +83,13 @@ func (r *notificationRepo) List(ctx context.Context, p notification.ListParams) 
 		q += ` AND is_read = FALSE`
 	}
 	if p.Cursor != "" {
-		ts, err := time.Parse(time.RFC3339Nano, p.Cursor)
-		if err == nil {
-			args = append(args, ts)
-			q += ` AND created_at < $` + itoa(len(args))
+		ts, id, ok := decodeCursor(p.Cursor)
+		if ok {
+			args = append(args, ts, id)
+			q += ` AND (created_at, id) < ($` + itoa(len(args)-1) + `, $` + itoa(len(args)) + `)`
 		}
 	}
-	q += ` ORDER BY created_at DESC LIMIT $2`
+	q += ` ORDER BY created_at DESC, id DESC LIMIT $2`
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -204,4 +253,24 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[pos:])
+}
+
+func encodeCursor(createdAt time.Time, id uuid.UUID) string {
+	return createdAt.UTC().Format(time.RFC3339Nano) + "|" + id.String()
+}
+
+func decodeCursor(cursor string) (time.Time, uuid.UUID, bool) {
+	tsText, idText, ok := strings.Cut(cursor, "|")
+	if !ok {
+		return time.Time{}, uuid.Nil, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, tsText)
+	if err != nil {
+		return time.Time{}, uuid.Nil, false
+	}
+	id, err := uuid.Parse(idText)
+	if err != nil {
+		return time.Time{}, uuid.Nil, false
+	}
+	return ts, id, true
 }

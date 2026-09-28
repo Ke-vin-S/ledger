@@ -15,11 +15,13 @@ import (
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	stored   *settlement.Settlement
-	balance  *settlement.DebtBalance
-	balErr   error
-	findErr  error
-	createErr error
+	stored          *settlement.Settlement
+	expense         *settlement.ExpenseAccess
+	defaultCreditor uuid.UUID
+	balance         *settlement.DebtBalance
+	balErr          error
+	findErr         error
+	createErr       error
 }
 
 func (r *fakeRepo) Create(_ context.Context, s *settlement.Settlement) (*settlement.Settlement, error) {
@@ -30,6 +32,10 @@ func (r *fakeRepo) Create(_ context.Context, s *settlement.Settlement) (*settlem
 	s.CreatedAt = time.Now()
 	r.stored = s
 	return s, nil
+}
+
+func (r *fakeRepo) RecordSettlementTx(_ context.Context, s *settlement.Settlement) (*settlement.Settlement, error) {
+	return r.Create(context.Background(), s)
 }
 
 func (r *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*settlement.Settlement, error) {
@@ -47,6 +53,16 @@ func (r *fakeRepo) ListByExpense(_ context.Context, _ uuid.UUID) ([]*settlement.
 		return nil, nil
 	}
 	return []*settlement.Settlement{r.stored}, nil
+}
+
+func (r *fakeRepo) FindExpense(_ context.Context, id uuid.UUID) (*settlement.ExpenseAccess, error) {
+	if r.expense != nil && r.expense.ID == id {
+		return r.expense, nil
+	}
+	if r.defaultCreditor != uuid.Nil {
+		return &settlement.ExpenseAccess{ID: id, PaidBy: r.defaultCreditor}, nil
+	}
+	return nil, settlement.ErrNotFound
 }
 
 func (r *fakeRepo) Confirm(_ context.Context, id, confirmedBy uuid.UUID) (*settlement.Settlement, error) {
@@ -89,8 +105,18 @@ func (r *fakeRepo) ListUserNetBalances(_ context.Context, _ uuid.UUID) ([]*settl
 	return nil, nil
 }
 
+type fakeTeamGateway struct {
+	role   string
+	status string
+	err    error
+}
+
+func (g *fakeTeamGateway) GetMembership(_ context.Context, _, _ uuid.UUID) (string, string, error) {
+	return g.role, g.status, g.err
+}
+
 func newSvc(repo settlement.Repository) *settlement.Service {
-	return settlement.NewService(repo, audit.NopLogger())
+	return settlement.NewService(repo, &fakeTeamGateway{}, audit.NopLogger())
 }
 
 func makeInput(payerID, payeeID uuid.UUID, amount int64) settlement.RecordInput {
@@ -109,7 +135,8 @@ func makeInput(payerID, payeeID uuid.UUID, amount int64) settlement.RecordInput 
 func TestRecordSettlement_PayerCanRecord(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 5000},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 5000},
 	}
 	svc := newSvc(repo)
 
@@ -128,11 +155,11 @@ func TestRecordSettlement_PayerCanRecord(t *testing.T) {
 func TestRecordSettlement_PayeeCanRecord(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 1000},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 1000},
 	}
 	svc := newSvc(repo)
 
-	// Payee acts as the actor (recording on behalf)
 	_, err := svc.RecordSettlement(context.Background(), payee, makeInput(payer, payee, 500))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -142,7 +169,8 @@ func TestRecordSettlement_PayeeCanRecord(t *testing.T) {
 func TestRecordSettlement_ThirdParty_Forbidden(t *testing.T) {
 	payer, payee, other := uuid.New(), uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 5000},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 5000},
 	}
 	svc := newSvc(repo)
 
@@ -155,7 +183,8 @@ func TestRecordSettlement_ThirdParty_Forbidden(t *testing.T) {
 func TestRecordSettlement_ExceedsBalance_Error(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 2000},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 2000},
 	}
 	svc := newSvc(repo)
 
@@ -168,7 +197,8 @@ func TestRecordSettlement_ExceedsBalance_Error(t *testing.T) {
 func TestRecordSettlement_ExactBalance_Succeeds(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 1500},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 1500},
 	}
 	svc := newSvc(repo)
 
@@ -178,10 +208,27 @@ func TestRecordSettlement_ExactBalance_Succeeds(t *testing.T) {
 	}
 }
 
+func TestRecordSettlement_NonPositiveAmount_Error(t *testing.T) {
+	payer, payee := uuid.New(), uuid.New()
+	repo := &fakeRepo{defaultCreditor: payee, balance: &settlement.DebtBalance{Balance: 5000}}
+	svc := newSvc(repo)
+
+	for _, amount := range []int64{0, -1} {
+		_, err := svc.RecordSettlement(context.Background(), payer, makeInput(payer, payee, amount))
+		if !errors.Is(err, settlement.ErrInvalidInput) {
+			t.Fatalf("amount %d: want ErrInvalidInput, got %v", amount, err)
+		}
+	}
+	if repo.stored != nil {
+		t.Fatal("non-positive settlement was persisted")
+	}
+}
+
 func TestRecordSettlement_NoDebt_Error(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balErr: settlement.ErrNoDebt,
+		defaultCreditor: payee,
+		balErr:          settlement.ErrNoDebt,
 	}
 	svc := newSvc(repo)
 
@@ -194,13 +241,45 @@ func TestRecordSettlement_NoDebt_Error(t *testing.T) {
 func TestRecordSettlement_InvalidMethod_Error(t *testing.T) {
 	payer, payee := uuid.New(), uuid.New()
 	repo := &fakeRepo{
-		balance: &settlement.DebtBalance{Balance: 5000},
+		defaultCreditor: payee,
+		balance:         &settlement.DebtBalance{Balance: 5000},
 	}
 	svc := newSvc(repo)
 
 	in := makeInput(payer, payee, 500)
 	in.Method = "bitcoin"
 	_, err := svc.RecordSettlement(context.Background(), payer, in)
+	if !errors.Is(err, settlement.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestRecordSettlement_NonCreditorPayeeRejected(t *testing.T) {
+	payer, creditor, accomplice := uuid.New(), uuid.New(), uuid.New()
+	repo := &fakeRepo{
+		defaultCreditor: creditor,
+		balance:         &settlement.DebtBalance{Balance: 5000},
+	}
+	svc := newSvc(repo)
+
+	_, err := svc.RecordSettlement(context.Background(), payer, makeInput(payer, accomplice, 1000))
+	if !errors.Is(err, settlement.ErrInvalidPayee) {
+		t.Fatalf("want ErrInvalidPayee, got %v", err)
+	}
+	if repo.stored != nil {
+		t.Fatal("invalid settlement was persisted")
+	}
+}
+
+func TestRecordSettlement_SelfPaymentRejected(t *testing.T) {
+	user := uuid.New()
+	repo := &fakeRepo{
+		defaultCreditor: user,
+		balance:         &settlement.DebtBalance{Balance: 5000},
+	}
+	svc := newSvc(repo)
+
+	_, err := svc.RecordSettlement(context.Background(), user, makeInput(user, user, 100))
 	if !errors.Is(err, settlement.ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
 	}

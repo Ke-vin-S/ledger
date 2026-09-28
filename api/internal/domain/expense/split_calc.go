@@ -61,6 +61,9 @@ func computePercentage(amount int64, inputs []SplitInput) ([]SplitEntry, error) 
 	}
 	var sum float64
 	for _, inp := range inputs {
+		if inp.ShareUnits < 0 || inp.ShareUnits > 100 {
+			return nil, fmt.Errorf("%w: percentage must be between 0 and 100", ErrInvalidSplitData)
+		}
 		sum += inp.ShareUnits
 	}
 	if math.Abs(sum-100.0) > 0.01 {

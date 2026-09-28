@@ -1,10 +1,14 @@
 "use client";
-
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Sheet, SheetTrigger, SheetContent, SheetClose } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetClose,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +20,13 @@ import { useMe } from "@/hooks/useAuth";
 import { useCreateExpense } from "@/hooks/useExpenses";
 import { ApiRequestError } from "@/lib/api";
 import { CURRENCIES, SPLIT_METHODS } from "@/constants/config";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { SplitMethod, SplitEntry } from "@/types/expense.types";
 import type { PickedMember } from "@/types/team.types";
 
@@ -34,14 +44,21 @@ type FormValues = z.infer<typeof schema>;
 
 function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
   const { data: teams } = useTeams();
+  const formId = useId();
   const { data: me } = useMe();
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
   const [amount, setAmount] = useState(0);
   const [currency, setCurrency] = useState("LKR");
   const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
   const [participants, setParticipants] = useState<string[]>([]);
-  const [participantObjects, setParticipantObjects] = useState<PickedMember[]>([]);
+  const [participantObjects, setParticipantObjects] = useState<PickedMember[]>(
+    [],
+  );
   const [splits, setSplits] = useState<SplitEntry[]>([]);
+  const [splitValidity, setSplitValidity] = useState({
+    valid: true,
+    message: "",
+  });
   const [serverError, setServerError] = useState<string | null>(null);
 
   const { data: teamMembers } = useTeamMembers(selectedTeamId);
@@ -78,6 +95,12 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
       setServerError("Select at least one participant to split with.");
       return;
     }
+    if (!splitValidity.valid) {
+      setServerError(
+        splitValidity.message || "Configure a valid split before saving.",
+      );
+      return;
+    }
     setServerError(null);
     try {
       const payload: Parameters<typeof mutateAsync>[0] = {
@@ -88,7 +111,10 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
         expense_date: data.expense_date,
         paid_by: data.paid_by,
         note: data.note || undefined,
-        splits: splits.length > 0 ? splits : participants.map((id) => ({ user_id: id })),
+        splits:
+          splits.length > 0
+            ? splits
+            : participants.map((id) => ({ user_id: id })),
       };
       await mutateAsync(payload);
       reset();
@@ -107,119 +133,171 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       {serverError && (
-        <div className="p-3 rounded-lg bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] text-sm">
+        <div
+          role="alert"
+          className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+        >
           {serverError}
         </div>
       )}
 
       {/* Team */}
       <div className="space-y-1.5">
-        <Label>Team</Label>
+        <Label htmlFor={`${formId}-team`}>Team</Label>
         <Controller
           name="team_id"
           control={control}
           render={({ field }) => (
-            <Select value={field.value} onValueChange={(v) => { field.onChange(v); handleTeamChange(v); }}>
-              <SelectTrigger>
+            <Select
+              value={field.value}
+              onValueChange={(v) => {
+                field.onChange(v);
+                handleTeamChange(v);
+              }}
+            >
+              <SelectTrigger id={`${formId}-team`}>
                 <SelectValue placeholder="Select a team…" />
               </SelectTrigger>
               <SelectContent>
                 {teams?.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           )}
         />
-        {errors.team_id && <p className="text-xs text-[hsl(var(--destructive))]">{errors.team_id.message}</p>}
+        {errors.team_id && (
+          <p className="text-xs text-destructive">{errors.team_id.message}</p>
+        )}
       </div>
 
       {/* Title */}
       <div className="space-y-1.5">
-        <Label>Title</Label>
-        <Input placeholder="e.g. Dinner at Commons" {...register("title")} />
-        {errors.title && <p className="text-xs text-[hsl(var(--destructive))]">{errors.title.message}</p>}
+        <Label htmlFor={`${formId}-title`}>Title</Label>
+        <Input
+          id={`${formId}-title`}
+          placeholder="e.g. Dinner at Commons"
+          {...register("title")}
+        />
+        {errors.title && (
+          <p className="text-xs text-destructive">{errors.title.message}</p>
+        )}
       </div>
 
       {/* Currency + Date */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Currency</Label>
+          <Label htmlFor={`${formId}-currency`}>Currency</Label>
           <Controller
             name="currency"
             control={control}
             render={({ field }) => (
-              <Select value={field.value} onValueChange={(v) => { field.onChange(v); setCurrency(v); }}>
-                <SelectTrigger>
+              <Select
+                value={field.value}
+                onValueChange={(v) => {
+                  field.onChange(v);
+                  setCurrency(v);
+                }}
+              >
+                <SelectTrigger id={`${formId}-currency`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {CURRENCIES.map(({ code, label }) => (
-                    <SelectItem key={code} value={code}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Date</Label>
-          <Input type="date" {...register("expense_date")} />
-          {errors.expense_date && <p className="text-xs text-[hsl(var(--destructive))]">{errors.expense_date.message}</p>}
-        </div>
-      </div>
-
-      {/* Amount */}
-      <div className="space-y-1.5">
-        <Label>Amount</Label>
-        <AmountInput
-          value={amount}
-          currency={currency}
-          onChange={(v) => { setAmount(v); setValue("amount", v); }}
-        />
-        {errors.amount && <p className="text-xs text-[hsl(var(--destructive))]">{errors.amount.message}</p>}
-      </div>
-
-      {/* Paid by */}
-      {selectedTeamId && teamMembers && teamMembers.length > 0 && (
-        <div className="space-y-1.5">
-          <Label>Paid by</Label>
-          <Controller
-            name="paid_by"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select who paid…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {teamMembers.map((m) => (
-                    <SelectItem key={m.user_id} value={m.user_id}>
-                      {m.display_name}{isAnonymousMember(m) ? " (anon)" : ""}
+                    <SelectItem key={code} value={code}>
+                      {label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
           />
-          {errors.paid_by && <p className="text-xs text-[hsl(var(--destructive))]">{errors.paid_by.message}</p>}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${formId}-date`}>Date</Label>
+          <Input
+            id={`${formId}-date`}
+            type="date"
+            {...register("expense_date")}
+          />
+          {errors.expense_date && (
+            <p className="text-xs text-destructive">
+              {errors.expense_date.message}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Amount */}
+      <div className="space-y-1.5">
+        <Label htmlFor={`${formId}-amount`}>Amount</Label>
+        <AmountInput
+          id={`${formId}-amount`}
+          value={amount}
+          currency={currency}
+          onChange={(v) => {
+            setAmount(v);
+            setValue("amount", v);
+          }}
+        />
+        {errors.amount && (
+          <p className="text-xs text-destructive">{errors.amount.message}</p>
+        )}
+      </div>
+
+      {/* Paid by */}
+      {selectedTeamId && teamMembers && teamMembers.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${formId}-paid-by`}>Paid by</Label>
+          <Controller
+            name="paid_by"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger id={`${formId}-paid-by`}>
+                  <SelectValue placeholder="Select who paid…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teamMembers.map((m) => (
+                    <SelectItem key={m.user_id} value={m.user_id}>
+                      {m.display_name}
+                      {isAnonymousMember(m) ? " (anon)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {errors.paid_by && (
+            <p className="text-xs text-destructive">{errors.paid_by.message}</p>
+          )}
         </div>
       )}
 
       {/* Split method */}
       <div className="space-y-1.5">
-        <Label>Split method</Label>
+        <Label htmlFor={`${formId}-split-method`}>Split method</Label>
         <Controller
           name="split_method"
           control={control}
           render={({ field }) => (
-            <Select value={field.value} onValueChange={(v) => { field.onChange(v); setSplitMethod(v as SplitMethod); }}>
-              <SelectTrigger>
+            <Select
+              value={field.value}
+              onValueChange={(v) => {
+                field.onChange(v);
+                setSplitMethod(v as SplitMethod);
+              }}
+            >
+              <SelectTrigger id={`${formId}-split-method`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {SPLIT_METHODS.map(({ value, label }) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -229,21 +307,25 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Participants */}
       {selectedTeamId && (
-        <div className="space-y-2">
-          <Label>Participants</Label>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium leading-none">
+            Participants
+          </legend>
           <MemberPicker
             teamId={selectedTeamId}
             selected={participants}
             onChange={setParticipants}
             onMembersChange={setParticipantObjects}
           />
-        </div>
+        </fieldset>
       )}
 
       {/* SplitBuilder */}
       {participants.length > 0 && amount > 0 && (
-        <div className="space-y-2 border rounded-xl p-3 bg-[hsl(var(--muted)/0.4)]">
-          <Label className="text-xs uppercase tracking-wide text-[hsl(var(--muted-foreground))]">Split preview</Label>
+        <fieldset className="space-y-2 border rounded-xl p-3 bg-muted/40">
+          <legend className="text-xs uppercase tracking-wide text-muted-foreground">
+            Split preview
+          </legend>
           <SplitBuilder
             participants={participantObjects}
             total={amount}
@@ -251,22 +333,41 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
             method={splitMethod}
             value={splits}
             onChange={setSplits}
+            onValidityChange={(valid, message) =>
+              setSplitValidity({ valid, message: message ?? "" })
+            }
           />
-        </div>
+        </fieldset>
       )}
 
       {/* Note */}
       <div className="space-y-1.5">
-        <Label>Note <span className="text-[hsl(var(--muted-foreground))]">(optional)</span></Label>
-        <Input placeholder="Any additional details" {...register("note")} />
+        <Label htmlFor={`${formId}-note`}>
+          Note <span className="text-muted-foreground">(optional)</span>
+        </Label>
+        <Input
+          id={`${formId}-note`}
+          placeholder="Any additional details"
+          {...register("note")}
+        />
       </div>
-
       <div className="flex gap-3 pt-2">
-        <Button type="submit" disabled={isPending || !selectedTeamId} className="flex-1">
+        <Button
+          type="submit"
+          disabled={
+            isPending ||
+            !selectedTeamId ||
+            participants.length === 0 ||
+            !splitValidity.valid
+          }
+          className="flex-1"
+        >
           {isPending ? "Adding…" : "Add expense"}
         </Button>
         <SheetClose asChild>
-          <Button type="button" variant="outline">Cancel</Button>
+          <Button type="button" variant="outline">
+            Cancel
+          </Button>
         </SheetClose>
       </div>
     </form>

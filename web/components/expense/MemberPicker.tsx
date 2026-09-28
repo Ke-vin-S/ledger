@@ -19,26 +19,46 @@ type Props = {
   onMembersChange?: (members: PickedMember[]) => void;
 };
 
-export function MemberPicker({ teamId, selected, onChange, onMembersChange }: Props) {
+export function MemberPicker({
+  teamId,
+  selected,
+  onChange,
+  onMembersChange,
+}: Props) {
   const { data: members = [] } = useTeamMembers(teamId);
-  const { mutateAsync: addAnonymous, isPending: addingAnon } = useAddAnonymousMember(teamId);
+  const { mutateAsync: addAnonymous, isPending: addingAnon } =
+    useAddAnonymousMember(teamId);
 
   const [showAnonInput, setShowAnonInput] = useState(false);
   const [anonName, setAnonName] = useState("");
   const [anonError, setAnonError] = useState("");
 
   // Build a unified map of all available members
-  const memberMap = new Map(members.map((m) => [m.user_id, { id: m.user_id, name: m.display_name, isAnonymous: m.identity_type === "anonymous" }]));
+  const memberMap = new Map(
+    members.map((m) => [
+      m.user_id,
+      {
+        id: m.user_id,
+        name: m.display_name,
+        isAnonymous: m.identity_type === "anonymous",
+      },
+    ]),
+  );
 
   function toggle(id: string) {
-    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+    const next = selected.includes(id)
+      ? selected.filter((x) => x !== id)
+      : [...selected, id];
     onChange(next);
     onMembersChange?.(next.map((id) => memberMap.get(id) ?? { id, name: id }));
   }
 
   async function handleAddAnon() {
     const name = anonName.trim();
-    if (!name) { setAnonError("Name is required"); return; }
+    if (!name) {
+      setAnonError("Name is required");
+      return;
+    }
     setAnonError("");
     try {
       const created = await addAnonymous({ display_name: name });
@@ -64,14 +84,16 @@ export function MemberPicker({ teamId, selected, onChange, onMembersChange }: Pr
           const isAnon = m.identity_type === "anonymous";
           return (
             <button
+              aria-pressed={isSelected}
+              aria-label={`${isSelected ? "Remove" : "Add"} ${m.display_name}${isAnon ? " (anonymous)" : ""} as expense participant`}
               key={m.user_id}
               type="button"
               onClick={() => toggle(m.user_id)}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-all",
+                "flex min-h-9 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium transition-all",
                 isSelected
-                  ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] border-[hsl(var(--primary))]"
-                  : "bg-[hsl(var(--background))] text-[hsl(var(--foreground))] border-[hsl(var(--border))] hover:border-[hsl(var(--primary)/0.5)]",
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-foreground border-border hover:border-primary/50",
                 isAnon && !isSelected && "border-dashed",
               )}
             >
@@ -80,10 +102,14 @@ export function MemberPicker({ teamId, selected, onChange, onMembersChange }: Pr
               ) : isAnon ? (
                 <UserX className="h-3 w-3 flex-shrink-0 opacity-60" />
               ) : (
-                <Avatar name={m.display_name} size="sm" className="h-4 w-4 text-[0.5rem]" />
+                <Avatar
+                  name={m.display_name}
+                  size="sm"
+                  className="h-4 w-4 text-xs"
+                />
               )}
-              <span className="max-w-[120px] truncate">{m.display_name}</span>
-              {isAnon && <span className="opacity-60 text-[0.65rem]">(anon)</span>}
+              <span className="max-w-30 truncate">{m.display_name}</span>
+              {isAnon && <span className="opacity-60 text-xs">(anon)</span>}
             </button>
           );
         })}
@@ -93,19 +119,43 @@ export function MemberPicker({ teamId, selected, onChange, onMembersChange }: Pr
         <div className="flex gap-2 items-start">
           <div className="flex-1 space-y-1">
             <Input
+              aria-label="Anonymous participant name"
+              aria-invalid={anonError ? true : undefined}
               placeholder="Person's name (no account)"
               value={anonName}
               onChange={(e) => setAnonName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddAnon())}
-              className="h-8 text-xs"
+              onKeyDown={(e) =>
+                e.key === "Enter" && (e.preventDefault(), handleAddAnon())
+              }
+              className="h-9 text-xs"
               autoFocus
             />
-            {anonError && <p className="text-xs text-[hsl(var(--destructive))]">{anonError}</p>}
+            {anonError && (
+              <p role="alert" className="text-xs text-destructive">
+                {anonError}
+              </p>
+            )}
           </div>
-          <Button type="button" size="sm" onClick={handleAddAnon} disabled={addingAnon} className="h-8 text-xs">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleAddAnon}
+            disabled={addingAnon}
+            className="min-h-9 text-xs"
+          >
             {addingAnon ? "Adding…" : "Add"}
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => { setShowAnonInput(false); setAnonName(""); setAnonError(""); }} className="h-8 text-xs">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setShowAnonInput(false);
+              setAnonName("");
+              setAnonError("");
+            }}
+            className="min-h-9 text-xs"
+          >
             Cancel
           </Button>
         </div>
@@ -113,9 +163,9 @@ export function MemberPicker({ teamId, selected, onChange, onMembersChange }: Pr
         <button
           type="button"
           onClick={() => setShowAnonInput(true)}
-          className="flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+          className="flex min-h-9 items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <Plus className="h-3 w-3" />
+          <Plus className="h-3 w-3" aria-hidden="true" />
           Add someone without account
         </button>
       )}

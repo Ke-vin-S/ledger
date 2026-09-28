@@ -41,14 +41,42 @@ func (r *userRepo) Create(ctx context.Context, u *user.User) (*user.User, error)
 	return created, nil
 }
 
-func (r *userRepo) CreateAnonymous(ctx context.Context, displayName string, _ uuid.UUID) (*user.User, error) {
+func (r *userRepo) CreateAnonymous(ctx context.Context, displayName string, createdBy uuid.UUID) (*user.User, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	u := &user.User{
 		IdentityType: user.IdentityTypeAnonymous,
 		DisplayName:  displayName,
 		CurrencyPref: "LKR",
 		Timezone:     "Asia/Colombo",
 	}
-	return insertUser(ctx, r.pool, u)
+	created, err := insertUser(ctx, tx, u)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO anonymous_users (anon_user_id, created_by) VALUES ($1, $2)`, created.ID, createdBy); err != nil {
+		return nil, fmt.Errorf("record anonymous owner: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit anonymous user: %w", err)
+	}
+	return created, nil
+}
+
+func (r *userRepo) GetAnonymousOwner(ctx context.Context, anonUserID uuid.UUID) (uuid.UUID, error) {
+	var createdBy uuid.UUID
+	err := r.pool.QueryRow(ctx, `SELECT created_by FROM anonymous_users WHERE anon_user_id = $1 AND created_by IS NOT NULL`, anonUserID).Scan(&createdBy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, user.ErrNotFound
+		}
+		return uuid.Nil, err
+	}
+	return createdBy, nil
 }
 
 func (r *userRepo) FindByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
@@ -173,9 +201,12 @@ func (r *userRepo) Claim(ctx context.Context, tokenHash string, claimedByID uuid
 	err = tx.QueryRow(ctx, `
 		UPDATE claim_tokens
 		SET used_at = NOW()
-		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+		WHERE token_hash = $1
+		  AND used_at IS NULL
+		  AND expires_at > NOW()
+		  AND created_by = $2
 		RETURNING anon_user_id
-	`, tokenHash).Scan(&anonUserID)
+	`, tokenHash, claimedByID).Scan(&anonUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, user.ErrClaimTokenExpired

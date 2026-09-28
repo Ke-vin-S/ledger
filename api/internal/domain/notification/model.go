@@ -36,10 +36,10 @@ type NotificationPrefs struct {
 
 // ListParams controls pagination for listing notifications.
 type ListParams struct {
-	UserID    uuid.UUID
+	UserID     uuid.UUID
 	UnreadOnly bool
-	Limit     int
-	Cursor    string // opaque: ISO timestamp of last seen created_at
+	Limit      int
+	Cursor     string // opaque: ISO timestamp of last seen created_at
 }
 
 // UpdatePrefsInput carries fields the caller may change.

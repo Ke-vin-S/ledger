@@ -95,6 +95,29 @@ func newSvc(repo loan.Repository) *loan.Service {
 	return loan.NewService(repo, audit.NopLogger())
 }
 
+type recordingAuditor struct{ entries []audit.Entry }
+
+func (a *recordingAuditor) Log(_ context.Context, entry audit.Entry) error {
+	a.entries = append(a.entries, entry)
+	return nil
+}
+
+func TestCreateLoan_EmitsAuditEvent(t *testing.T) {
+	repo := newFakeRepo()
+	auditor := &recordingAuditor{}
+	svc := loan.NewService(repo, auditor)
+	created, err := svc.CreateLoan(context.Background(), loan.CreateInput{
+		UserID: uuid.New(), Direction: loan.DirectionLent, Amount: 100,
+		Currency: "LKR", CounterpartyName: "Alice", LoanDate: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("create loan: %v", err)
+	}
+	if len(auditor.entries) != 1 || auditor.entries[0].Action != audit.ActionLoanCreated || auditor.entries[0].EntityID != created.ID {
+		t.Fatalf("unexpected audit entries: %+v", auditor.entries)
+	}
+}
+
 func ptr(s string) *string { return &s }
 
 // seed inserts a loan owned by owner and returns it.

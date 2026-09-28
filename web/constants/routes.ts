@@ -5,12 +5,14 @@ export const ROUTES = {
   dashboard: "/dashboard",
   teams: "/teams",
   team: (teamId: string) => `/teams/${teamId}`,
-  teamExpense: (teamId: string, expenseId: string) => `/teams/${teamId}/expenses/${expenseId}`,
+  teamExpense: (teamId: string, expenseId: string) =>
+    `/teams/${teamId}/expenses/${expenseId}`,
   loans: "/loans",
   loanDetail: (id: string) => `/loans/${id}`,
   notifications: "/notifications",
   settings: "/settings",
-  invite: (token: string) => `/invite/${token}`,
+  invite: (token: string) => `/invitations/${token}`,
   invitation: (token: string) => `/invitations/${token}`,
   claim: (token: string) => `/claim/${token}`,
+  resetPassword: "/reset-password",
 } as const;
